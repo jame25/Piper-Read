@@ -28,8 +28,6 @@ namespace PiperTTS
         {
             selectedSpeed = MapSpeedValue(speedTrackBar.Value);
 
-            SetSettingsFileReadOnly(false); // Remove the read-only attribute
-
             // Update the speed value in the settings.conf file
             string settingsFilePath = "settings.conf";
             string[] lines = File.ReadAllLines(settingsFilePath);
@@ -42,8 +40,6 @@ namespace PiperTTS
                 }
             }
             File.WriteAllLines(settingsFilePath, lines);
-
-            SetSettingsFileReadOnly(true); // Set the read-only attribute back
         }
 
 
@@ -202,25 +198,6 @@ namespace PiperTTS
             {
                 MessageBox.Show($"An error occurred during form initialization: {ex.Message}");
                 // Log the exception details or write them to a file for further analysis
-            }
-        }
-
-        private void SetSettingsFileReadOnly(bool readOnly)
-        {
-            string settingsFilePath = "settings.conf";
-
-            if (File.Exists(settingsFilePath))
-            {
-                FileAttributes attributes = File.GetAttributes(settingsFilePath);
-
-                if (readOnly)
-                {
-                    File.SetAttributes(settingsFilePath, attributes | FileAttributes.ReadOnly);
-                }
-                else
-                {
-                    File.SetAttributes(settingsFilePath, attributes & ~FileAttributes.ReadOnly);
-                }
             }
         }
 
@@ -554,8 +531,6 @@ namespace PiperTTS
         {
             string settingsPath = "settings.conf";
 
-            SetSettingsFileReadOnly(false); // Remove the read-only attribute
-
             string[] lines = File.ReadAllLines(settingsPath);
 
             // Append the ".onnx" extension if it's missing
@@ -572,10 +547,6 @@ namespace PiperTTS
                     break;
                 }
             }
-
-            File.WriteAllLines(settingsPath, lines);
-
-            SetSettingsFileReadOnly(true); // Set the read-only attribute back
         }
 
 
@@ -590,8 +561,6 @@ namespace PiperTTS
         {
             selectedSpeed = MapSpeedValue(speedTrackBar.Value);
 
-            SetSettingsFileReadOnly(false); // Remove the read-only attribute
-
             // Update the speed value in the settings.conf file
             string settingsFilePath = "settings.conf";
             string[] lines = File.ReadAllLines(settingsFilePath);
@@ -604,8 +573,6 @@ namespace PiperTTS
                 }
             }
             File.WriteAllLines(settingsFilePath, lines);
-
-            SetSettingsFileReadOnly(true); // Set the read-only attribute back
         }
 
 
@@ -669,7 +636,7 @@ namespace PiperTTS
         }
         private void AboutToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            string aboutMessage = "Version: 1.0.1\n" +
+            string aboutMessage = "Version: 1.0.2\n" +
                                   "Developed by jame25\n\n" +
                                   "https://github.com/jame25/piper-read";
 
