@@ -26,7 +26,7 @@ Piper Tray should support all available Piper voice models, by default **en_US-l
 
 ## Changing Voice Model:
 
-Click on the voice name at the bottom of the application and select your new voice. No restart necessary!
+Click on the voice name at the bottom of the application and select from another voice from the list. No restart necessary!
 
 ## Support:
 
