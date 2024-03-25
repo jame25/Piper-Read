@@ -1,4 +1,4 @@
-﻿namespace PiperTTS
+namespace PiperTTS
 {
     partial class Form1
     {
@@ -131,7 +131,7 @@
             this.speedTrackBar.LargeChange = 1;
             this.speedTrackBar.TickFrequency = 1;
             this.speedTrackBar.Value = 5;
-            this.speedTrackBar.ValueChanged += new System.EventHandler(this.speedTrackBar_ValueChanged);
+            this.speedTrackBar.MouseUp += new System.Windows.Forms.MouseEventHandler(this.speedTrackBar_MouseUp);
             this.Controls.Add(this.speedTrackBar);
         }
 
