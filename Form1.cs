@@ -2,6 +2,7 @@ using System;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -16,10 +17,37 @@ namespace PiperTTS
         private string outputFile = "output.wav";
         private WaveOutEvent waveOut;
         private AudioFileReader audioFileReader;
-        private string settingsFile = "settings.conf";
         private bool isConverting = false;
         private Label currentVoiceLabel;
         private Label voiceLabel;
+        private const double MinSpeed = 0.1;
+        private const double MaxSpeed = 1.0;
+        private double selectedSpeed;
+
+        private void speedTrackBar_MouseUp(object sender, MouseEventArgs e)
+        {
+            selectedSpeed = MapSpeedValue(speedTrackBar.Value);
+
+            SetSettingsFileReadOnly(false); // Remove the read-only attribute
+
+            // Update the speed value in the settings.conf file
+            string settingsFilePath = "settings.conf";
+            string[] lines = File.ReadAllLines(settingsFilePath);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (lines[i].StartsWith("speed="))
+                {
+                    lines[i] = $"speed={selectedSpeed.ToString("0.0", CultureInfo.InvariantCulture)}";
+                    break;
+                }
+            }
+            File.WriteAllLines(settingsFilePath, lines);
+
+            SetSettingsFileReadOnly(true); // Set the read-only attribute back
+        }
+
+
+
         private void OpenMenuItem_Click(object sender, EventArgs e)
         {
             OpenFileDialog openFileDialog = new OpenFileDialog();
@@ -40,11 +68,6 @@ namespace PiperTTS
                 }
             }
         }
-
-
-        private const double MinSpeed = 0.1;
-        private const double MaxSpeed = 1.0;
-        private double selectedSpeed;
 
 
         public Form1()
@@ -148,13 +171,16 @@ namespace PiperTTS
                 string speedValue = ReadSpeedFromConfig();
                 if (!string.IsNullOrEmpty(speedValue))
                 {
-                    selectedSpeed = double.Parse(speedValue);
-                    speedTrackBar.Value = (int)Math.Round((selectedSpeed - MinSpeed) / (MaxSpeed - MinSpeed) * (speedTrackBar.Maximum - speedTrackBar.Minimum)) + speedTrackBar.Minimum;
+                    selectedSpeed = double.Parse(speedValue, CultureInfo.InvariantCulture);
+                    int trackBarValue = (int)Math.Round((MaxSpeed - selectedSpeed) / (MaxSpeed - MinSpeed) * (speedTrackBar.Maximum - speedTrackBar.Minimum)) + speedTrackBar.Minimum;
+                    speedTrackBar.Value = Math.Max(speedTrackBar.Minimum, Math.Min(trackBarValue, speedTrackBar.Maximum));
                 }
                 else
                 {
                     selectedSpeed = MapSpeedValue(speedTrackBar.Value);
                 }
+
+
 
                 // Create the "File" menu item if it doesn't exist
                 ToolStripMenuItem fileMenu = menuStrip1.Items.OfType<ToolStripMenuItem>().FirstOrDefault(item => item.Text == "File");
@@ -179,6 +205,25 @@ namespace PiperTTS
             }
         }
 
+        private void SetSettingsFileReadOnly(bool readOnly)
+        {
+            string settingsFilePath = "settings.conf";
+
+            if (File.Exists(settingsFilePath))
+            {
+                FileAttributes attributes = File.GetAttributes(settingsFilePath);
+
+                if (readOnly)
+                {
+                    File.SetAttributes(settingsFilePath, attributes | FileAttributes.ReadOnly);
+                }
+                else
+                {
+                    File.SetAttributes(settingsFilePath, attributes & ~FileAttributes.ReadOnly);
+                }
+            }
+        }
+
         private bool CheckForOnnxFiles()
         {
             string exeDirectory = AppDomain.CurrentDomain.BaseDirectory;
@@ -194,23 +239,25 @@ namespace PiperTTS
         }
 
 
-
-
         private string ReadSpeedFromConfig()
         {
-            string configFile = "settings.conf";
-            if (File.Exists(configFile))
+            string speedValue = null;
+            string settingsFilePath = "settings.conf";
+
+            if (File.Exists(settingsFilePath))
             {
-                string[] lines = File.ReadAllLines(configFile);
+                string[] lines = File.ReadAllLines(settingsFilePath);
                 foreach (string line in lines)
                 {
                     if (line.StartsWith("speed="))
                     {
-                        return line.Substring("speed=".Length);
+                        speedValue = line.Split('=')[1].Trim();
+                        break;
                     }
                 }
             }
-            return null;
+
+            return speedValue;
         }
 
 
@@ -506,6 +553,9 @@ namespace PiperTTS
         private void SaveSelectedModelToSettings(string selectedModel)
         {
             string settingsPath = "settings.conf";
+
+            SetSettingsFileReadOnly(false); // Remove the read-only attribute
+
             string[] lines = File.ReadAllLines(settingsPath);
 
             // Append the ".onnx" extension if it's missing
@@ -524,7 +574,10 @@ namespace PiperTTS
             }
 
             File.WriteAllLines(settingsPath, lines);
+
+            SetSettingsFileReadOnly(true); // Set the read-only attribute back
         }
+
 
 
         private double MapSpeedValue(int trackBarValue)
@@ -536,11 +589,26 @@ namespace PiperTTS
         private void speedTrackBar_ValueChanged(object sender, EventArgs e)
         {
             selectedSpeed = MapSpeedValue(speedTrackBar.Value);
-            // Update any labels or UI elements that display the selected speed
 
-            // Save the updated speed value to the settings file
-            SaveSpeedToSettings(selectedSpeed);
+            SetSettingsFileReadOnly(false); // Remove the read-only attribute
+
+            // Update the speed value in the settings.conf file
+            string settingsFilePath = "settings.conf";
+            string[] lines = File.ReadAllLines(settingsFilePath);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (lines[i].StartsWith("speed="))
+                {
+                    lines[i] = $"speed={selectedSpeed.ToString("0.0", CultureInfo.InvariantCulture)}";
+                    break;
+                }
+            }
+            File.WriteAllLines(settingsFilePath, lines);
+
+            SetSettingsFileReadOnly(true); // Set the read-only attribute back
         }
+
+
 
         private void SaveSpeedToSettings(double speed)
         {
@@ -601,7 +669,7 @@ namespace PiperTTS
         }
         private void AboutToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            string aboutMessage = "Version: 1.0.0\n" +
+            string aboutMessage = "Version: 1.0.1\n" +
                                   "Developed by jame25\n\n" +
                                   "https://github.com/jame25/piper-read";
 
@@ -679,6 +747,23 @@ namespace PiperTTS
             aboutForm.ShowDialog(this);
         }
 
+        private void StopPlayback()
+        {
+            if (waveOut != null)
+            {
+                waveOut.Stop();
+                waveOut.Dispose();
+                waveOut = null;
+            }
+
+            if (audioFileReader != null)
+            {
+                audioFileReader.Dispose();
+                audioFileReader = null;
+            }
+        }
+
+
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             base.OnFormClosing(e);
@@ -707,4 +792,3 @@ namespace PiperTTS
         }
     }
 }
-
