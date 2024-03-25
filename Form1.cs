@@ -603,7 +603,7 @@ namespace PiperTTS
         {
             string aboutMessage = "Version: 1.0.0\n" +
                                   "Developed by jame25\n\n" +
-                                  "https://github.com/piper-read";
+                                  "https://github.com/jame25/piper-read";
 
             // Create a new form for the about dialog
             Form aboutForm = new Form();
@@ -612,7 +612,7 @@ namespace PiperTTS
             aboutForm.MaximizeBox = false;
             aboutForm.MinimizeBox = false;
             aboutForm.StartPosition = FormStartPosition.CenterParent;
-            aboutForm.ClientSize = new Size(300, 200);
+            aboutForm.ClientSize = new Size(350, 200);
 
             try
             {
@@ -645,13 +645,13 @@ namespace PiperTTS
 
             // Set the LinkArea to make the URL clickable
             int startIndex = aboutMessage.IndexOf("https://");
-            int length = "https://github.com/piper-read".Length;
+            int length = "https://github.com/jame25/piper-read".Length;
             aboutLinkLabel.LinkArea = new LinkArea(startIndex, length);
 
             // Handle the LinkClicked event to open the URL in a web browser
             aboutLinkLabel.LinkClicked += (s, args) =>
             {
-                string url = "https://github.com/piper-read";
+                string url = "https://github.com/jame25/piper-read";
                 ProcessStartInfo psi = new ProcessStartInfo
                 {
                     FileName = url,
