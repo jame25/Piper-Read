@@ -24,6 +24,10 @@ Piper Read is a small GUI utility for Windows, that utilizes [Piper](https://git
 
 Piper Tray should support all available Piper voice models, by default **en_US-libritts_r-medium.onnx** and .json are expected to be present in directory.
 
+## Changing Voice Model:
+
+Click on the voice name at the bottom of the application and select your new voice. No restart necessary!
+
 ## Support:
 
 If you find this project helpful and would like to support its development, you can buy me a coffee on Ko-Fi:
