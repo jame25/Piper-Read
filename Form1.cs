@@ -261,10 +261,10 @@ namespace PiperTTS
                 string[] lines = File.ReadAllLines(filePath);
                 foreach (string line in lines)
                 {
-                    string keyword = line.Trim();
-                    if (!string.IsNullOrWhiteSpace(keyword))
+                    string word = line.Trim().ToLowerInvariant();
+                    if (!string.IsNullOrWhiteSpace(word))
                     {
-                        dictionary.Add(keyword);
+                        dictionary.Add(word);
                     }
                 }
             }
@@ -307,30 +307,30 @@ namespace PiperTTS
                     HashSet<string> ignoreDictionary = ReadDictionaryFile("ignore.dict");
                     HashSet<string> bannedDictionary = ReadDictionaryFile("banned.dict");
 
-                    // Split the input text into sentences
-                    string[] sentences = text.Split(new[] { '.', '!', '?' }, StringSplitOptions.RemoveEmptyEntries);
+                    // Split the input text into lines
+                    string[] lines = text.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
 
-                    // Process each sentence
-                    List<string> processedSentences = new List<string>();
-                    foreach (string sentence in sentences)
+                    // Process each line
+                    List<string> processedLines = new List<string>();
+                    foreach (string line in lines)
                     {
-                        string trimmedSentence = sentence.Trim();
+                        string[] words = line.Split(new[] { ' ', ',', '.', '!', '?' }, StringSplitOptions.RemoveEmptyEntries);
 
-                        // Check if the sentence contains any banned keywords
-                        bool isBanned = bannedDictionary.Any(keyword => trimmedSentence.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0);
-
-                        if (!isBanned)
+                        // Check if any word is in the banned dictionary
+                        if (words.Any(word => bannedDictionary.Contains(word.ToLowerInvariant())))
                         {
-                            // Remove ignored keywords from the sentence
-                            string[] words = trimmedSentence.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-                            string processedSentence = string.Join(" ", words.Where(word => !ignoreDictionary.Contains(word)));
-
-                            processedSentences.Add(processedSentence);
+                            continue; // Skip the line if a banned word is found
                         }
+
+                        // Remove ignored words from the line
+                        words = words.Where(word => !ignoreDictionary.Contains(word.ToLowerInvariant())).ToArray();
+
+                        string processedLine = string.Join(" ", words);
+                        processedLines.Add(processedLine);
                     }
 
-                    // Join the processed sentences back into a single string
-                    string processedText = string.Join(". ", processedSentences);
+                    // Join the processed lines back into a single string
+                    string processedText = string.Join(". ", processedLines);
 
                     // Run Piper TTS to generate speech based on the processed text
                     ProcessStartInfo startInfo = new ProcessStartInfo();
@@ -479,7 +479,6 @@ namespace PiperTTS
                 }
             }
         }
-
 
 
         private void WaveOut_PlaybackStopped(object sender, StoppedEventArgs e)
@@ -686,7 +685,7 @@ namespace PiperTTS
         }
         private void AboutToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            string aboutMessage = "Version: 1.0.3\n" +
+            string aboutMessage = "Version: 1.0.4\n" +
                                   "Developed by jame25\n\n" +
                                   "https://github.com/jame25/piper-read";
 
