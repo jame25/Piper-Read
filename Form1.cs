@@ -253,6 +253,23 @@ namespace PiperTTS
             currentVoiceLabel.Text = voiceName;
         }
 
+        private HashSet<string> ReadDictionaryFile(string filePath)
+        {
+            HashSet<string> dictionary = new HashSet<string>();
+            if (File.Exists(filePath))
+            {
+                string[] lines = File.ReadAllLines(filePath);
+                foreach (string line in lines)
+                {
+                    string keyword = line.Trim();
+                    if (!string.IsNullOrWhiteSpace(keyword))
+                    {
+                        dictionary.Add(keyword);
+                    }
+                }
+            }
+            return dictionary;
+        }
 
 
         private async void ConvertButton_Click(object sender, EventArgs e)
@@ -286,7 +303,36 @@ namespace PiperTTS
                     // Update the current voice label
                     UpdateCurrentVoiceLabel();
 
-                    // Run Piper TTS to generate speech based on the input text
+                    // Read the 'ignore' and 'banned' dictionaries
+                    HashSet<string> ignoreDictionary = ReadDictionaryFile("ignore.dict");
+                    HashSet<string> bannedDictionary = ReadDictionaryFile("banned.dict");
+
+                    // Split the input text into sentences
+                    string[] sentences = text.Split(new[] { '.', '!', '?' }, StringSplitOptions.RemoveEmptyEntries);
+
+                    // Process each sentence
+                    List<string> processedSentences = new List<string>();
+                    foreach (string sentence in sentences)
+                    {
+                        string trimmedSentence = sentence.Trim();
+
+                        // Check if the sentence contains any banned keywords
+                        bool isBanned = bannedDictionary.Any(keyword => trimmedSentence.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0);
+
+                        if (!isBanned)
+                        {
+                            // Remove ignored keywords from the sentence
+                            string[] words = trimmedSentence.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                            string processedSentence = string.Join(" ", words.Where(word => !ignoreDictionary.Contains(word)));
+
+                            processedSentences.Add(processedSentence);
+                        }
+                    }
+
+                    // Join the processed sentences back into a single string
+                    string processedText = string.Join(". ", processedSentences);
+
+                    // Run Piper TTS to generate speech based on the processed text
                     ProcessStartInfo startInfo = new ProcessStartInfo();
                     startInfo.FileName = "piper.exe";
                     startInfo.Arguments = $"--model {speechModel} --length_scale {speed} --output_file \"{outputFile}\"";
@@ -301,10 +347,10 @@ namespace PiperTTS
                         {
                             process.Start();
 
-                            // Write the input text to the process's standard input
+                            // Write the processed text to the process's standard input
                             using (StreamWriter writer = process.StandardInput)
                             {
-                                await writer.WriteAsync(text);
+                                await writer.WriteAsync(processedText);
                             }
 
                             // Start playing the audio in a separate thread
@@ -434,6 +480,8 @@ namespace PiperTTS
             }
         }
 
+
+
         private void WaveOut_PlaybackStopped(object sender, StoppedEventArgs e)
         {
             // Dispose the waveOut and audioFileReader instances
@@ -547,6 +595,8 @@ namespace PiperTTS
                     break;
                 }
             }
+
+            File.WriteAllLines(settingsPath, lines);
         }
 
 
@@ -636,7 +686,7 @@ namespace PiperTTS
         }
         private void AboutToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            string aboutMessage = "Version: 1.0.2\n" +
+            string aboutMessage = "Version: 1.03\n" +
                                   "Developed by jame25\n\n" +
                                   "https://github.com/jame25/piper-read";
 
