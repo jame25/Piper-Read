@@ -686,7 +686,7 @@ namespace PiperTTS
         }
         private void AboutToolStripMenuItem_Click(object sender, EventArgs e)
         {
-            string aboutMessage = "Version: 1.03\n" +
+            string aboutMessage = "Version: 1.0.3\n" +
                                   "Developed by jame25\n\n" +
                                   "https://github.com/jame25/piper-read";
 
