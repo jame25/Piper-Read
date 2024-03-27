@@ -30,6 +30,12 @@ Piper Tray should support all available Piper voice models, by default **en_US-l
 
 Click on the voice name at the bottom of the application and select from another voice from the list. No restart necessary!
 
+## Dictionary Rules:
+
+Keywords found in the **ignore.dict** file are skipped over. 
+
+If a keyword in the **banned.dict** file is detected, the entire sentence is skipped.
+
 ## Support:
 
 If you find this project helpful and would like to support its development, you can buy me a coffee on Ko-Fi:
