@@ -8,6 +8,8 @@ Piper Read is a small GUI utility for Windows, that utilizes [Piper](https://git
 * Change Piper TTS voice model
 * Control Piper TTS speech rate
 * Pause / Resume / Stop
+* Prevent keywords being read (ignore.dict)
+* Prevent sentences with keywords being read (banned.dict)
 * Open text files
 
 ## Prerequisites:
