@@ -9,7 +9,7 @@ Piper Read is a small GUI utility for Windows, that utilizes [Piper](https://git
 * Control Piper TTS speech rate
 * Pause / Resume / Stop
 * Prevent keywords being read (ignore.dict)
-* Prevent sentences with keywords being read (banned.dict)
+* Prevent lines with keywords being read (banned.dict)
 * Open text files
 
 ## Prerequisites:
@@ -34,7 +34,7 @@ Click on the voice name at the bottom of the application and select from another
 
 Keywords found in the **ignore.dict** file are skipped over. 
 
-If a keyword in the **banned.dict** file is detected, the entire sentence is skipped.
+If a keyword in the **banned.dict** file is detected, the entire line is skipped.
 
 ## Support:
 
