@@ -1,692 +1,189 @@
 using System;
-using System.ComponentModel;
+using System.Collections.Generic;
 using System.Diagnostics;
-using System.Drawing;
-using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Threading;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using NAudio.Wave;
 
-namespace PiperTTS
+namespace piper_read
 {
     public partial class Form1 : Form
     {
-        private string outputFile = "output.wav";
-        private WaveOutEvent waveOut;
-        private AudioFileReader audioFileReader;
-        private bool isConverting = false;
-        private Label currentVoiceLabel;
-        private Label voiceLabel;
-        private const double MinSpeed = 0.1;
-        private const double MaxSpeed = 1.0;
-        private double selectedSpeed;
+        private List<WaveOutEvent> waveOutEvents = new List<WaveOutEvent>();
+        private TrackBar trackBarSpeed;
+        private Label lblSpeed;
+        private bool stopPlayback = false;
+        private bool isPaused = false;
+        private string settingsPath = "settings.conf";
 
-        private void speedTrackBar_MouseUp(object sender, MouseEventArgs e)
+        public Form1()
         {
-            selectedSpeed = MapSpeedValue(speedTrackBar.Value);
+            InitializeComponent();
 
-            // Update the speed value in the settings.conf file
-            string settingsFilePath = "settings.conf";
-            string[] lines = File.ReadAllLines(settingsFilePath);
-            for (int i = 0; i < lines.Length; i++)
+            this.Icon = new System.Drawing.Icon("icon.ico");
+
+            // Create the trackBarSpeed control programmatically
+            trackBarSpeed = new TrackBar();
+            trackBarSpeed.Size = new Size((this.ClientSize.Width - btnClearStop.Width - 40) / 4, 45); // Adjust the size to quarter the available width
+            trackBarSpeed.Location = new Point(btnClearStop.Left - trackBarSpeed.Width - 10, btnClearStop.Top); // Position it closer to the "Clear" button
+            trackBarSpeed.Minimum = 1;
+            trackBarSpeed.Maximum = 10;
+            trackBarSpeed.TickFrequency = 1;
+            trackBarSpeed.SmallChange = 1;
+            trackBarSpeed.Value = 10;
+            trackBarSpeed.ValueChanged += TrackBarSpeed_ValueChanged;
+            this.Controls.Add(trackBarSpeed);
+
+            // Create the lblSpeed control programmatically
+            lblSpeed = new Label();
+            lblSpeed.Text = "Speed: " + (1.0 / trackBarSpeed.Value).ToString("0.0"); // Set the initial text with the calculated speed value
+            lblSpeed.AutoSize = true;
+            lblSpeed.MinimumSize = new Size(80, 0); // Set a minimum width for the label
+            lblSpeed.TextAlign = ContentAlignment.MiddleRight; // Align the text to the right
+            lblSpeed.Location = new Point(trackBarSpeed.Left - lblSpeed.Width - 5, trackBarSpeed.Top + (trackBarSpeed.Height - lblSpeed.Height) / 4);
+            this.Controls.Add(lblSpeed);
+
+            // Bring the lblSpeed control to the front
+            lblSpeed.BringToFront();
+
+            // Update the lblSpeed text when the trackBarSpeed value changes
+            trackBarSpeed.ValueChanged += (sender, e) =>
             {
-                if (lines[i].StartsWith("speed="))
-                {
-                    lines[i] = $"speed={selectedSpeed.ToString("0.0", CultureInfo.InvariantCulture)}";
-                    break;
-                }
+                double speed = (11 - trackBarSpeed.Value) * 0.1;
+                lblSpeed.Text = "Speed: " + speed.ToString("0.0");
+            };
+
+
+            // Adjust the positions and sizes of the controls when the form is resized
+            this.Resize += (sender, e) =>
+            {
+                trackBarSpeed.Size = new Size((this.ClientSize.Width - btnClearStop.Width - 40) / 4, 45);
+                trackBarSpeed.Location = new Point(btnClearStop.Left - trackBarSpeed.Width - 10, btnClearStop.Top);
+                lblSpeed.Location = new Point(trackBarSpeed.Left - lblSpeed.Width - 5, trackBarSpeed.Top + (trackBarSpeed.Height - lblSpeed.Height) / 4);
+            };
+
+
+
+            // Retrieve the selected model name and length scale from the settings file
+            (string selectedModelName, double lengthScale) = GetSelectedModelNameAndLengthScale();
+
+            // Set the model name in the lblModelName control
+            if (!string.IsNullOrEmpty(selectedModelName))
+            {
+                lblModelName.Text = selectedModelName;
             }
-            File.WriteAllLines(settingsFilePath, lines);
+            else
+            {
+                lblModelName.Text = "en_US-libritts_r-medium";
+            }
+
+            // Set the length scale value in the settings file if it doesn't exist
+            if (!File.ReadAllText(settingsPath).Contains("LengthScale="))
+            {
+                File.AppendAllText(settingsPath, Environment.NewLine + $"LengthScale={lengthScale}");
+            }
+
+            // Set the border style of lblModelName to FixedSingle
+            lblModelName.BorderStyle = BorderStyle.FixedSingle;
+
+            // Set the padding of lblModelName to add space around the text
+            lblModelName.Padding = new Padding(5);
+
+            // Add a click event handler for lblModelName
+            lblModelName.Click += LblModelName_Click;
         }
 
+        private (string, double) GetSelectedModelNameAndLengthScale()
+        {
+            if (File.Exists(settingsPath))
+            {
+                string[] lines = File.ReadAllLines(settingsPath);
+                string selectedModelName = null;
+                double lengthScale = 1.0; // Default value
 
+                foreach (string line in lines)
+                {
+                    if (line.StartsWith("SelectedModelName="))
+                    {
+                        selectedModelName = line.Split('=')[1];
+                    }
+                    else if (line.StartsWith("LengthScale="))
+                    {
+                        if (double.TryParse(line.Split('=')[1], out double scale))
+                        {
+                            lengthScale = scale;
+                        }
+                    }
+                }
+
+                // Set the trackbar value based on the saved length scale in the inverted order
+                trackBarSpeed.Value = (int)((1.1 - lengthScale) * 10);
+
+                return (selectedModelName, lengthScale);
+            }
+
+            return (null, 1.0); // Default value
+        }
+
+        private void SaveSelectedModelName(string modelName)
+        {
+            string content = $"SelectedModelName={modelName}";
+            File.WriteAllText(settingsPath, content);
+        }
+
+        private void SaveSelectedSpeedValue(double speedValue)
+        {
+            string content = File.ReadAllText(settingsPath);
+            string[] lines = content.Split(new[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries);
+
+            string updatedContent = "";
+            bool lengthScaleFound = false;
+
+            foreach (string line in lines)
+            {
+                if (line.StartsWith("LengthScale="))
+                {
+                    updatedContent += $"LengthScale={speedValue}{Environment.NewLine}";
+                    lengthScaleFound = true;
+                }
+                else
+                {
+                    updatedContent += line + Environment.NewLine;
+                }
+            }
+
+            if (!lengthScaleFound)
+            {
+                updatedContent += $"LengthScale={speedValue}{Environment.NewLine}";
+            }
+
+            File.WriteAllText(settingsPath, updatedContent.TrimEnd());
+        }
 
         private void OpenMenuItem_Click(object sender, EventArgs e)
         {
             OpenFileDialog openFileDialog = new OpenFileDialog();
             openFileDialog.Filter = "Text Files (*.txt)|*.txt";
-            openFileDialog.Title = "Open Text File";
-
             if (openFileDialog.ShowDialog() == DialogResult.OK)
             {
                 string filePath = openFileDialog.FileName;
-                try
-                {
-                    string fileContents = File.ReadAllText(filePath);
-                    textBox1.Text = fileContents;
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"Error reading file: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }
+                string fileContents = File.ReadAllText(filePath);
+                txtInput.Text = fileContents;
             }
         }
 
-
-        public Form1()
+        private void ExitMenuItem_Click(object sender, EventArgs e)
         {
-            try
-            {
-                InitializeComponent();
-                this.Icon = new Icon("icon.ico");
-
-                if (!CheckForOnnxFiles())
-                {
-                    Close();
-                    return;
-                }
-
-
-                // Create a TableLayoutPanel to arrange the controls at the bottom
-                TableLayoutPanel bottomPanel = new TableLayoutPanel();
-                bottomPanel.ColumnCount = 5;
-                bottomPanel.RowCount = 1;
-                bottomPanel.Dock = DockStyle.Bottom;
-                bottomPanel.AutoSize = true;
-                bottomPanel.AutoSizeMode = AutoSizeMode.GrowAndShrink;
-                bottomPanel.Padding = new Padding(10);
-                this.Controls.Add(bottomPanel);
-
-                // Set column widths
-                bottomPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-                bottomPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-                bottomPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-                bottomPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-                bottomPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-
-                // Add the convertButton to the bottomPanel
-                bottomPanel.Controls.Add(convertButton, 0, 0);
-
-                // Create and configure the voiceLabel
-                voiceLabel = new Label();
-                voiceLabel.AutoSize = true;
-                voiceLabel.Text = "Voice:";
-                voiceLabel.Anchor = AnchorStyles.Left | AnchorStyles.None;
-                bottomPanel.Controls.Add(voiceLabel, 1, 0);
-
-                // Create and configure the currentVoiceLabel
-                currentVoiceLabel = new Label();
-                currentVoiceLabel.AutoSize = true;
-                currentVoiceLabel.TextAlign = ContentAlignment.MiddleLeft;
-                currentVoiceLabel.BorderStyle = BorderStyle.FixedSingle;
-                currentVoiceLabel.Anchor = AnchorStyles.Left | AnchorStyles.None;
-                currentVoiceLabel.Click += CurrentVoiceLabel_Click;
-                bottomPanel.Controls.Add(currentVoiceLabel, 2, 0);
-
-                // Update speedTrackBar properties
-                speedTrackBar.Minimum = 1;
-                speedTrackBar.Maximum = 10;
-                speedTrackBar.Value = 10; // Set the initial value to 10 (corresponding to 1.0 speed)
-
-                // Create and configure the speedLabel
-                Label speedLabel = new Label();
-                speedLabel.AutoSize = true;
-                speedLabel.Text = "    Speed:";
-                speedLabel.TextAlign = ContentAlignment.MiddleRight;
-                speedLabel.Anchor = AnchorStyles.Left | AnchorStyles.None;
-                bottomPanel.Controls.Add(speedLabel, 3, 0);
-
-                // Add the speedTrackBar to the bottomPanel
-                speedTrackBar.Anchor = AnchorStyles.Left | AnchorStyles.None;
-                speedTrackBar.AutoSize = false;
-                speedTrackBar.Size = new Size(300, speedTrackBar.Height); // Set the size of the trackbar
-                speedTrackBar.Margin = new Padding(0, 0, 0, 0); // Add top margin to lower the trackbar
-                speedTrackBar.Padding = new Padding(0, 0, 50, 0); // Remove any padding to reduce vertical space
-                bottomPanel.Controls.Add(speedTrackBar, 4, 0);
-
-                /*// Create a TableLayoutPanel to hold the speedValue labels
-                TableLayoutPanel speedValueLabelsPanel = new TableLayoutPanel();
-                speedValueLabelsPanel.ColumnCount = 8;
-                speedValueLabelsPanel.RowCount = 1;
-                speedValueLabelsPanel.Dock = DockStyle.None;
-                speedValueLabelsPanel.AutoSize = true;
-                speedValueLabelsPanel.AutoSizeMode = AutoSizeMode.GrowAndShrink;
-                speedValueLabelsPanel.Margin = new Padding(0, -50, 0, 0); // Adjust the top margin to move the labels upwards
-                speedValueLabelsPanel.Padding = new Padding(0, -50, 0, 0); // Remove any padding to reduce vertical space
-                bottomPanel.Controls.Add(speedValueLabelsPanel, 4, 1); // Add the speedValueLabelsPanel to the second row of bottomPanel
-
-                // Create and add speedValue labels to the speedValueLabelsPanel
-                for (int i = 1; i <= 8; i++)
-                {
-                    Label speedValueLabel = new Label();
-                    speedValueLabel.AutoSize = true;
-                    speedValueLabel.Text = $"{i * 0.1:0.0}";
-                    speedValueLabel.TextAlign = ContentAlignment.MiddleCenter;
-                    speedValueLabel.Dock = DockStyle.None;
-                    speedValueLabelsPanel.Controls.Add(speedValueLabel, i - 1, 0);
-
-                    // Bring the speedValueLabelsPanel to the front
-                    speedValueLabelsPanel.BringToFront();*/
-
-
-                UpdateCurrentVoiceLabel();
-
-                string speedValue = ReadSpeedFromConfig();
-                if (!string.IsNullOrEmpty(speedValue))
-                {
-                    selectedSpeed = double.Parse(speedValue, CultureInfo.InvariantCulture);
-                    int trackBarValue = (int)Math.Round((MaxSpeed - selectedSpeed) / (MaxSpeed - MinSpeed) * (speedTrackBar.Maximum - speedTrackBar.Minimum)) + speedTrackBar.Minimum;
-                    speedTrackBar.Value = Math.Max(speedTrackBar.Minimum, Math.Min(trackBarValue, speedTrackBar.Maximum));
-                }
-                else
-                {
-                    selectedSpeed = MapSpeedValue(speedTrackBar.Value);
-                }
-
-
-
-                // Create the "File" menu item if it doesn't exist
-                ToolStripMenuItem fileMenu = menuStrip1.Items.OfType<ToolStripMenuItem>().FirstOrDefault(item => item.Text == "File");
-                if (fileMenu == null)
-                {
-                    fileMenu = new ToolStripMenuItem("File");
-                    menuStrip1.Items.Add(fileMenu);
-                }
-
-                // Create the "Open" menu item and add it as the first item in the "File" menu
-                ToolStripMenuItem openMenuItem = new ToolStripMenuItem("Open");
-                openMenuItem.Click += OpenMenuItem_Click;
-                fileMenu.DropDownItems.Insert(0, openMenuItem);
-
-                // Add other menu items to the "File" menu if needed
-                // ...
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"An error occurred during form initialization: {ex.Message}");
-                // Log the exception details or write them to a file for further analysis
-            }
-        }
-
-        private bool CheckForOnnxFiles()
-        {
-            string exeDirectory = AppDomain.CurrentDomain.BaseDirectory;
-            string[] onnxFiles = Directory.GetFiles(exeDirectory, "*.onnx");
-
-            if (onnxFiles.Length == 0)
-            {
-                MessageBox.Show("No .onnx files found in the application directory. Please make sure the model files are present.", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return false;
-            }
-
-            return true;
-        }
-
-
-        private string ReadSpeedFromConfig()
-        {
-            string speedValue = null;
-            string settingsFilePath = "settings.conf";
-
-            if (File.Exists(settingsFilePath))
-            {
-                string[] lines = File.ReadAllLines(settingsFilePath);
-                foreach (string line in lines)
-                {
-                    if (line.StartsWith("speed="))
-                    {
-                        speedValue = line.Split('=')[1].Trim();
-                        break;
-                    }
-                }
-            }
-
-            return speedValue;
-        }
-
-
-
-        private void UpdateCurrentVoiceLabel()
-        {
-            (string speechModel, _) = ReadSpeechModelAndSpeedFromSettings();
-            string voiceName = Path.GetFileNameWithoutExtension(speechModel);
-
-            // Remove the "model=" prefix if present
-            if (voiceName.StartsWith("model="))
-            {
-                voiceName = voiceName.Substring("model=".Length);
-            }
-
-            currentVoiceLabel.Text = voiceName;
-        }
-
-        private HashSet<string> ReadDictionaryFile(string filePath)
-        {
-            HashSet<string> dictionary = new HashSet<string>();
-            if (File.Exists(filePath))
-            {
-                string[] lines = File.ReadAllLines(filePath);
-                foreach (string line in lines)
-                {
-                    string word = line.Trim().ToLowerInvariant();
-                    if (!string.IsNullOrWhiteSpace(word))
-                    {
-                        dictionary.Add(word);
-                    }
-                }
-            }
-            return dictionary;
-        }
-
-
-        private async void ConvertButton_Click(object sender, EventArgs e)
-        {
-            if (isConverting)
-            {
-                return;
-            }
-
-            string text = textBox1?.Text;
-
-            if (string.IsNullOrWhiteSpace(text))
-            {
-                MessageBox.Show("Please enter some text to convert.");
-                return;
-            }
-
-            if (convertButton.Text == "Convert")
-            {
-                isConverting = true;
-                convertButton.Enabled = false;
-
-                try
-                {
-                    // Delete the previous output file if it exists
-                    DeleteOutputFile();
-
-                    // Read the speech model and speed from the settings file
-                    (string speechModel, string speed) = ReadSpeechModelAndSpeedFromSettings();
-
-                    // Update the current voice label
-                    UpdateCurrentVoiceLabel();
-
-                    // Read the 'ignore' and 'banned' dictionaries
-                    HashSet<string> ignoreDictionary = ReadDictionaryFile("ignore.dict");
-                    HashSet<string> bannedDictionary = ReadDictionaryFile("banned.dict");
-
-                    // Split the input text into lines
-                    string[] lines = text.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
-
-                    // Process each line
-                    List<string> processedLines = new List<string>();
-                    foreach (string line in lines)
-                    {
-                        string[] words = line.Split(new[] { ' ', ',', '.', '!', '?' }, StringSplitOptions.RemoveEmptyEntries);
-
-                        // Check if any word is in the banned dictionary
-                        if (words.Any(word => bannedDictionary.Contains(word.ToLowerInvariant())))
-                        {
-                            continue; // Skip the line if a banned word is found
-                        }
-
-                        // Remove ignored words from the line
-                        words = words.Where(word => !ignoreDictionary.Contains(word.ToLowerInvariant())).ToArray();
-
-                        string processedLine = string.Join(" ", words);
-                        processedLines.Add(processedLine);
-                    }
-
-                    // Join the processed lines back into a single string
-                    string processedText = string.Join(". ", processedLines);
-
-                    // Run Piper TTS to generate speech based on the processed text
-                    ProcessStartInfo startInfo = new ProcessStartInfo();
-                    startInfo.FileName = "piper.exe";
-                    startInfo.Arguments = $"--model {speechModel} --length_scale {speed} --output_file \"{outputFile}\"";
-                    startInfo.RedirectStandardInput = true;
-                    startInfo.UseShellExecute = false;
-                    startInfo.CreateNoWindow = true;
-
-                    using (Process process = new Process())
-                    {
-                        process.StartInfo = startInfo;
-                        try
-                        {
-                            process.Start();
-
-                            // Write the processed text to the process's standard input
-                            using (StreamWriter writer = process.StandardInput)
-                            {
-                                await writer.WriteAsync(processedText);
-                            }
-
-                            // Start playing the audio in a separate thread
-                            Task.Run(() =>
-                            {
-                                while (process.HasExited == false || File.Exists(outputFile))
-                                {
-                                    if (File.Exists(outputFile))
-                                    {
-                                        // Create a new AudioFileReader instance
-                                        audioFileReader = new AudioFileReader(outputFile);
-
-                                        // Create a new WaveOutEvent instance
-                                        waveOut = new WaveOutEvent();
-                                        waveOut.Init(audioFileReader);
-
-                                        // Subscribe to the PlaybackStopped event
-                                        waveOut.PlaybackStopped += WaveOut_PlaybackStopped;
-
-                                        // Change the Convert button text to "Pause"
-                                        convertButton.Invoke((MethodInvoker)(() => convertButton.Text = "Pause"));
-
-                                        // Change the Clear button text to "Stop"
-                                        clearButton.Invoke((MethodInvoker)(() => clearButton.Text = "Stop"));
-
-                                        try
-                                        {
-                                            // Play the generated speech
-                                            waveOut.Play();
-                                        }
-                                        catch (Exception ex)
-                                        {
-                                            MessageBox.Show($"An error occurred during playback: {ex.Message}");
-                                        }
-
-                                        break;
-                                    }
-
-                                    Thread.Sleep(100);
-                                }
-                            });
-
-                            await Task.Run(() => process.WaitForExit());
-
-                            if (process.ExitCode == 0)
-                            {
-                                // Wait for the output file to be generated
-                                int retryCount = 0;
-                                while (!File.Exists(outputFile) && retryCount < 3)
-                                {
-                                    await Task.Delay(500);
-                                    retryCount++;
-                                }
-
-                                // Check if the output file exists
-                                if (File.Exists(outputFile))
-                                {
-                                    // Create a new AudioFileReader instance
-                                    audioFileReader = new AudioFileReader(outputFile);
-
-                                    // Create a new WaveOutEvent instance
-                                    waveOut = new WaveOutEvent();
-                                    waveOut.Init(audioFileReader);
-
-                                    // Subscribe to the PlaybackStopped event
-                                    waveOut.PlaybackStopped += WaveOut_PlaybackStopped;
-
-                                    // Change the Convert button text to "Pause"
-                                    convertButton.Text = "Pause";
-
-                                    // Change the Clear button text to "Stop"
-                                    clearButton.Text = "Stop";
-
-                                    try
-                                    {
-                                        // Play the generated speech
-                                        waveOut.Play();
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        MessageBox.Show($"An error occurred during playback: {ex.Message}");
-                                    }
-                                }
-                                else
-                                {
-                                    MessageBox.Show("Output file not found.");
-                                }
-                            }
-                            else
-                            {
-                                MessageBox.Show($"Piper TTS process exited with code: {process.ExitCode}");
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            MessageBox.Show($"An error occurred: {ex.Message}");
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"An error occurred: {ex.Message}");
-                }
-                finally
-                {
-                    isConverting = false;
-                    convertButton.Enabled = true;
-                }
-            }
-            else if (convertButton.Text == "Pause")
-            {
-                // Pause the playback if waveOut is not null
-                if (waveOut != null)
-                {
-                    waveOut.Pause();
-                    convertButton.Text = "Resume";
-                }
-            }
-            else if (convertButton.Text == "Resume")
-            {
-                // Resume the playback if waveOut is not null
-                if (waveOut != null)
-                {
-                    waveOut.Play();
-                    convertButton.Text = "Pause";
-                }
-            }
-        }
-
-
-        private void WaveOut_PlaybackStopped(object sender, StoppedEventArgs e)
-        {
-            // Dispose the waveOut and audioFileReader instances
-            if (waveOut != null)
-            {
-                waveOut.Dispose();
-                waveOut = null;
-            }
-
-            if (audioFileReader != null)
-            {
-                audioFileReader.Dispose();
-                audioFileReader = null;
-            }
-
-            // Change the Convert button text back to "Convert"
-            convertButton.Text = "Convert";
-
-            // Change the Clear button text back to "Clear"
-            clearButton.Text = "Clear";
-
-            // Delete the output file
-            DeleteOutputFile();
-        }
-
-
-        private void DeleteOutputFile()
-        {
-            if (File.Exists(outputFile))
-            {
-                File.Delete(outputFile);
-            }
-        }
-
-        private (string speechModel, string speed) ReadSpeechModelAndSpeedFromSettings()
-        {
-            string settingsPath = "settings.conf";
-            string speechModel = "en_us-libritts_r-medium.onnx"; // Default model
-            string speed = "1.0"; // Default speed
-
-            if (File.Exists(settingsPath))
-            {
-                foreach (string line in File.ReadAllLines(settingsPath))
-                {
-                    string[] parts = line.Split('=');
-                    if (parts.Length == 2)
-                    {
-                        string key = parts[0].Trim();
-                        string value = parts[1].Trim();
-
-                        if (key == "model")
-                        {
-                            speechModel = value;
-                        }
-                        else if (key == "speed")
-                        {
-                            speed = value;
-                        }
-                    }
-                }
-            }
-
-            return (speechModel, speed);
-        }
-
-        private void CurrentVoiceLabel_Click(object sender, EventArgs e)
-        {
-            string modelsDirectory = AppDomain.CurrentDomain.BaseDirectory;
-            string[] modelFiles = Directory.GetFiles(modelsDirectory, "*.onnx");
-
-            List<string> modelNames = new List<string>();
-            foreach (string modelFile in modelFiles)
-            {
-                string modelName = Path.GetFileNameWithoutExtension(modelFile);
-                modelNames.Add(modelName);
-            }
-
-            string[] modelNamesArray = modelNames.ToArray();
-
-            using (VoiceSelectionForm form = new VoiceSelectionForm(modelNamesArray))
-            {
-                if (form.ShowDialog() == DialogResult.OK)
-                {
-                    string selectedModel = form.SelectedModel;
-                    SaveSelectedModelToSettings(selectedModel);
-                    UpdateCurrentVoiceLabel();
-                }
-            }
-        }
-
-
-
-
-        private void SaveSelectedModelToSettings(string selectedModel)
-        {
-            string settingsPath = "settings.conf";
-
-            string[] lines = File.ReadAllLines(settingsPath);
-
-            // Append the ".onnx" extension if it's missing
-            if (!selectedModel.EndsWith(".onnx", StringComparison.OrdinalIgnoreCase))
-            {
-                selectedModel += ".onnx";
-            }
-
-            for (int i = 0; i < lines.Length; i++)
-            {
-                if (lines[i].StartsWith("model="))
-                {
-                    lines[i] = $"model={selectedModel}";
-                    break;
-                }
-            }
-
-            File.WriteAllLines(settingsPath, lines);
-        }
-
-
-
-        private double MapSpeedValue(int trackBarValue)
-        {
-            double speed = (MaxSpeed - MinSpeed) * (10 - trackBarValue) / 9 + MinSpeed;
-            return Math.Round(speed, 1);
-        }
-
-        private void speedTrackBar_ValueChanged(object sender, EventArgs e)
-        {
-            selectedSpeed = MapSpeedValue(speedTrackBar.Value);
-
-            // Update the speed value in the settings.conf file
-            string settingsFilePath = "settings.conf";
-            string[] lines = File.ReadAllLines(settingsFilePath);
-            for (int i = 0; i < lines.Length; i++)
-            {
-                if (lines[i].StartsWith("speed="))
-                {
-                    lines[i] = $"speed={selectedSpeed.ToString("0.0", CultureInfo.InvariantCulture)}";
-                    break;
-                }
-            }
-            File.WriteAllLines(settingsFilePath, lines);
-        }
-
-
-
-        private void SaveSpeedToSettings(double speed)
-        {
-            string settingsPath = "settings.conf";
-            string[] lines = File.ReadAllLines(settingsPath);
-
-            for (int i = 0; i < lines.Length; i++)
-            {
-                if (lines[i].StartsWith("speed="))
-                {
-                    lines[i] = $"speed={speed}";
-                    break;
-                }
-            }
-
-            File.WriteAllLines(settingsPath, lines);
-        }
-
-
-
-        private void ClearButton_Click(object sender, EventArgs e)
-        {
-            if (clearButton.Text == "Clear")
-            {
-                textBox1?.Clear();
-            }
-            else if (clearButton.Text == "Stop")
-            {
-                // Stop the playback and dispose the waveOut and audioFileReader if they are not null
-                if (waveOut != null)
-                {
-                    waveOut.Stop();
-                    waveOut.Dispose();
-                    waveOut = null;
-                }
-
-                if (audioFileReader != null)
-                {
-                    audioFileReader.Dispose();
-                    audioFileReader = null;
-                }
-
-                // Change the Convert button text back to "Convert"
-                convertButton.Text = "Convert";
-
-                // Change the Clear button text back to "Clear"
-                clearButton.Text = "Clear";
-
-                // Delete the output file
-                DeleteOutputFile();
-            }
-        }
-
-        private void ExitToolStripMenuItem_Click(object sender, EventArgs e)
-        {
-            // Add code to handle the Exit menu item click event
             Application.Exit();
         }
-        private void AboutToolStripMenuItem_Click(object sender, EventArgs e)
+
+        private void AboutMenuItem_Click(object sender, EventArgs e)
         {
-            string aboutMessage = "Version: 1.0.4\n" +
-                                  "Developed by jame25\n\n" +
+            string aboutMessage = "Version: 1.0.5\n" +
+                                  "Developed by jame25\n\n\n\n" +
                                   "https://github.com/jame25/piper-read";
 
             // Create a new form for the about dialog
@@ -763,48 +260,377 @@ namespace PiperTTS
             aboutForm.ShowDialog(this);
         }
 
-        private void StopPlayback()
-        {
-            if (waveOut != null)
-            {
-                waveOut.Stop();
-                waveOut.Dispose();
-                waveOut = null;
-            }
 
-            if (audioFileReader != null)
+        private void LblModelName_Click(object sender, EventArgs e)
+        {
+            // Get the directory path of the piper_read.exe
+            string exeDirectory = AppDomain.CurrentDomain.BaseDirectory;
+
+            // Get all .onnx files in the directory
+            string[] onnxFiles = Directory.GetFiles(exeDirectory, "*.onnx");
+
+            // Create a new form for the popup dialog
+            using (Form popupForm = new Form())
             {
-                audioFileReader.Dispose();
-                audioFileReader = null;
+                popupForm.Text = "Select Voice";
+                popupForm.FormBorderStyle = FormBorderStyle.FixedDialog;
+                popupForm.StartPosition = FormStartPosition.CenterParent;
+                popupForm.MaximizeBox = false;
+                popupForm.MinimizeBox = false;
+                popupForm.ClientSize = new Size(300, 200);
+
+                // Create a ListBox control to display the model names
+                ListBox listBox = new ListBox();
+                listBox.Location = new Point(10, 10);
+                listBox.Size = new Size(280, 130);
+
+                // Extract the model names from the file paths and add them to the ListBox
+                foreach (string onnxFile in onnxFiles)
+                {
+                    string modelName = Path.GetFileNameWithoutExtension(onnxFile);
+                    listBox.Items.Add(modelName);
+                }
+
+                // Create an "OK" button
+                Button okButton = new Button();
+                okButton.Text = "OK";
+                okButton.DialogResult = DialogResult.OK;
+                okButton.Location = new Point(10, 150);
+                okButton.Size = new Size(80, 30);
+                okButton.Click += (s, args) =>
+                {
+                    if (listBox.SelectedItem != null)
+                    {
+                        // Update the lblModelName text with the selected model name without the .onnx extension
+                        lblModelName.Text = listBox.SelectedItem.ToString();
+                    }
+                };
+
+                // Create a "Cancel" button
+                Button cancelButton = new Button();
+                cancelButton.Text = "Cancel";
+                cancelButton.DialogResult = DialogResult.Cancel;
+                cancelButton.Location = new Point(210, 150);
+                cancelButton.Size = new Size(80, 30);
+
+                popupForm.Controls.Add(listBox);
+                popupForm.Controls.Add(okButton);
+                popupForm.Controls.Add(cancelButton);
+                popupForm.AcceptButton = okButton;
+                popupForm.CancelButton = cancelButton;
+
+                // Show the popup dialog and check the result
+                if (popupForm.ShowDialog(this) == DialogResult.OK)
+                {
+                    if (listBox.SelectedItem != null)
+                    {
+                        // Update the lblModelName text with the selected model name without the .onnx extension
+                        string selectedModelName = listBox.SelectedItem.ToString();
+                        lblModelName.Text = selectedModelName;
+
+                        // Save the selected model name to the settings file
+                        SaveSelectedModelName(selectedModelName);
+                    }
+                }
             }
         }
 
-
-        protected override void OnFormClosing(FormClosingEventArgs e)
+        private void TrackBarSpeed_ValueChanged(object sender, EventArgs e)
         {
-            base.OnFormClosing(e);
+            // Calculate the speed value in the inverted order
+            double speedValue = (11 - trackBarSpeed.Value) * 0.1;
+            lblSpeed.Text = $"Speed: {speedValue:0.0}";
 
-            if (!e.Cancel)
+            // Save the selected speed value to the settings file
+            SaveSelectedSpeedValue(speedValue);
+        }
+
+        private async void btnConvert_Click(object sender, EventArgs e)
+        {
+            // Read the contents of "ignore.dict" file
+            string[] ignoreKeywords = File.ReadAllLines("ignore.dict");
+
+            // Read the contents of "banned.dict" file
+            string[] bannedKeywords = File.ReadAllLines("banned.dict");
+
+            // Read the contents of "replace.dict" file
+            string[] replaceKeywords = File.ReadAllLines("replace.dict");
+
+            // Create the replaceDict dictionary
+            Dictionary<string, string> replaceDict = new Dictionary<string, string>();
+            foreach (string line in replaceKeywords)
             {
-                Application.Exit();
+                string[] parts = line.Split('=');
+                if (parts.Length == 2)
+                {
+                    replaceDict[parts[0]] = parts[1];
+                }
             }
 
-            // Stop the playback and dispose the waveOut and audioFileReader if they are not null
-            if (waveOut != null)
+
+            if (btnConvert.Text == "Convert")
             {
-                waveOut.Stop();
-                waveOut.Dispose();
-                waveOut = null;
+                string inputText = txtInput.Text;
+
+                if (string.IsNullOrWhiteSpace(inputText))
+                {
+                    MessageBox.Show("Please enter some text to convert.", "Warning", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                // Disable the "Convert" button during audio playback
+                btnConvert.Enabled = false;
+
+                string[] paragraphs = inputText.Split(new[] { Environment.NewLine + Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries);
+
+                stopPlayback = false;
+                isPaused = false;
+
+                // Change the "Clear" button text to "Stop"
+                btnClearStop.Text = "Stop";
+
+                Task<MemoryStream> previousProcessingTask = null;
+
+                for (int i = 0; i < paragraphs.Length; i++)
+                {
+                    if (stopPlayback)
+                        break;
+
+                    string paragraph = paragraphs[i];
+
+
+                    // Handle full stop before quotation marks
+                    paragraph = HandleFullStopBeforeQuotationMarks(paragraph);
+
+                    // Check if the paragraph contains any banned keywords
+                    if (bannedKeywords.Any(keyword => paragraph.Contains(keyword)))
+                    {
+                        // Skip the entire line if a banned keyword is found
+                        continue;
+                    }
+
+                    // Remove ignore keywords from the paragraph
+                    foreach (string keyword in ignoreKeywords)
+                    {
+                        paragraph = paragraph.Replace(keyword, string.Empty);
+                    }
+
+                    // Replace words based on the "replace.dict" file
+                    foreach (var entry in replaceDict)
+                    {
+                        paragraph = paragraph.Replace(entry.Key, entry.Value);
+                    }
+
+                    // Retrieve the length scale value from the settings file
+                    double lengthScale = (11 - trackBarSpeed.Value) * 0.1;
+
+                    // Create a task to process the current paragraph with piper.exe
+                    Task<MemoryStream> currentProcessingTask = Task.Run(async () =>
+                    {
+                        using (Process piperProcess = new Process())
+                        {
+                            piperProcess.StartInfo.FileName = "piper.exe";
+                            // Append the .onnx extension to the model name
+                            string modelName = lblModelName.Text + ".onnx";
+                            piperProcess.StartInfo.Arguments = $"--model {modelName} --length_scale {lengthScale} --output-raw";
+                            piperProcess.StartInfo.UseShellExecute = false;
+                            piperProcess.StartInfo.CreateNoWindow = true;
+                            piperProcess.StartInfo.RedirectStandardInput = true;
+                            piperProcess.StartInfo.RedirectStandardOutput = true;
+                            piperProcess.Start();
+
+                            // Write the paragraph to the standard input of the process
+                            using (StreamWriter writer = piperProcess.StandardInput)
+                            {
+                                await writer.WriteAsync(paragraph);
+                            }
+
+                            // Create a buffer to store the audio data
+                            byte[] buffer = new byte[16384];
+                            MemoryStream audioStream = new MemoryStream();
+
+                            // Read the audio data from piper.exe output in chunks
+                            int bytesRead;
+                            while ((bytesRead = await piperProcess.StandardOutput.BaseStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                            {
+                                audioStream.Write(buffer, 0, bytesRead);
+                            }
+
+                            return audioStream;
+                        }
+                    });
+
+                    if (previousProcessingTask != null)
+                    {
+                        // Wait for the previous paragraph's processing to complete
+                        MemoryStream audioStream = await previousProcessingTask;
+                        audioStream.Position = 0;
+
+                        using (WaveStream waveStream = new RawSourceWaveStream(audioStream, new WaveFormat(22000, 1)))
+                        {
+                            WaveOutEvent waveOutEvent = new WaveOutEvent();
+                            waveOutEvent.Init(waveStream);
+                            waveOutEvents.Add(waveOutEvent);
+                            waveOutEvent.Play();
+
+                            // Change the button text to "Pause"
+                            btnConvert.Text = "Pause";
+                            btnConvert.Enabled = true;
+
+                            while (waveOutEvent.PlaybackState == PlaybackState.Playing || waveOutEvent.PlaybackState == PlaybackState.Paused)
+                            {
+                                if (stopPlayback)
+                                {
+                                    waveOutEvent.Stop();
+                                    break;
+                                }
+
+                                if (isPaused && waveOutEvent.PlaybackState == PlaybackState.Playing)
+                                {
+                                    waveOutEvent.Pause();
+                                }
+                                else if (!isPaused && waveOutEvent.PlaybackState == PlaybackState.Paused)
+                                {
+                                    waveOutEvent.Play();
+                                }
+
+                                await Task.Delay(10);
+                            }
+
+                            // Remove the completed WaveOutEvent from the list
+                            waveOutEvents.Remove(waveOutEvent);
+                        }
+                    }
+
+                    previousProcessingTask = currentProcessingTask;
+                }
+
+                if (previousProcessingTask != null)
+                {
+                    // Wait for the last paragraph's processing to complete
+                    MemoryStream audioStream = await previousProcessingTask;
+                    audioStream.Position = 0;
+
+                    using (WaveStream waveStream = new RawSourceWaveStream(audioStream, new WaveFormat(22000, 1)))
+                    {
+                        WaveOutEvent waveOutEvent = new WaveOutEvent();
+                        waveOutEvent.Init(waveStream);
+                        waveOutEvents.Add(waveOutEvent);
+                        waveOutEvent.Play();
+
+                        // Change the button text to "Pause"
+                        btnConvert.Text = "Pause";
+                        btnConvert.Enabled = true;
+
+                        while (waveOutEvent.PlaybackState == PlaybackState.Playing || waveOutEvent.PlaybackState == PlaybackState.Paused)
+                        {
+                            if (stopPlayback)
+                            {
+                                waveOutEvent.Stop();
+                                break;
+                            }
+
+                            if (isPaused && waveOutEvent.PlaybackState == PlaybackState.Playing)
+                            {
+                                waveOutEvent.Pause();
+                            }
+                            else if (!isPaused && waveOutEvent.PlaybackState == PlaybackState.Paused)
+                            {
+                                waveOutEvent.Play();
+                            }
+
+                            await Task.Delay(10);
+                        }
+
+                        // Remove the completed WaveOutEvent from the list
+                        waveOutEvents.Remove(waveOutEvent);
+                    }
+                }
+
+                // Change the button text back to "Convert" if playback has ended
+                if (!isPaused && waveOutEvents.Count == 0)
+                {
+                    btnConvert.Text = "Convert";
+                    // Change the "Stop" button text back to "Clear"
+                    btnClearStop.Text = "Clear";
+                }
+            }
+            else if (btnConvert.Text == "Pause")
+            {
+                // Pause the audio playback for all paragraphs
+                foreach (var waveOutEvent in waveOutEvents)
+                {
+                    if (waveOutEvent.PlaybackState == PlaybackState.Playing)
+                    {
+                        waveOutEvent.Pause();
+                    }
+                }
+                isPaused = true;
+                btnConvert.Text = "Resume";
+            }
+            else if (btnConvert.Text == "Resume")
+            {
+                // Resume the audio playback for all paragraphs
+                foreach (var waveOutEvent in waveOutEvents)
+                {
+                    if (waveOutEvent.PlaybackState == PlaybackState.Paused)
+                    {
+                        waveOutEvent.Play();
+                    }
+                }
+                isPaused = false;
+                btnConvert.Text = "Pause";
+            }
+        }
+
+        private string HandleFullStopBeforeQuotationMarks(string paragraph)
+        {
+            string[] quotationMarks = { "\"", "'" };
+
+            foreach (string mark in quotationMarks)
+            {
+                int index = paragraph.IndexOf(mark);
+                while (index != -1)
+                {
+                    if (index > 0 && paragraph[index - 1] == '.')
+                    {
+                        paragraph = paragraph.Insert(index, " ");
+                        index++;
+                    }
+                    index = paragraph.IndexOf(mark, index + 1);
+                }
             }
 
-            if (audioFileReader != null)
-            {
-                audioFileReader.Dispose();
-                audioFileReader = null;
-            }
+            return paragraph;
+        }
 
-            // Delete the output file
-            DeleteOutputFile();
+
+        private void btnClearStop_Click(object sender, EventArgs e)
+        {
+            if (btnClearStop.Text == "Clear")
+            {
+                // Clear the contents of the txtInput control
+                txtInput.Clear();
+            }
+            else if (btnClearStop.Text == "Stop")
+            {
+                // Set the stopPlayback flag to true
+                stopPlayback = true;
+
+                // Stop the audio playback for all paragraphs
+                foreach (var waveOutEvent in waveOutEvents)
+                {
+                    if (waveOutEvent.PlaybackState == PlaybackState.Playing || waveOutEvent.PlaybackState == PlaybackState.Paused)
+                    {
+                        waveOutEvent.Stop();
+                    }
+                }
+                waveOutEvents.Clear();
+                isPaused = false;
+                btnConvert.Text = "Convert";
+                // Change the "Stop" button text back to "Clear"
+                btnClearStop.Text = "Clear";
+            }
         }
     }
 }
