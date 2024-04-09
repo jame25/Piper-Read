@@ -10,6 +10,7 @@ Piper Read is a small GUI utility for Windows, that utilizes [Piper](https://git
 * Pause / Resume / Stop
 * Prevent keywords being read (ignore.dict)
 * Prevent lines with keywords being read (banned.dict)
+* Replace keywords with alternatives (replace.dict)
 * Open text files
 
 ## Prerequisites:
