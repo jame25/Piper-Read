@@ -37,6 +37,8 @@ Keywords found in the **ignore.dict** file are skipped over.
 
 If a keyword in the **banned.dict** file is detected, the entire line is skipped.
 
+**replace.dict** functions as a replacement for a keyword or phrase, i.e LHC=Large Hadron Collider.
+
 ## Support:
 
 If you find this project helpful and would like to support its development, you can buy me a coffee on Ko-Fi:
