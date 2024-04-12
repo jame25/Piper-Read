@@ -146,7 +146,7 @@ namespace piper_read
             {
                 if (line.StartsWith("LengthScale="))
                 {
-                    updatedContent += $"LengthScale={speedValue}{Environment.NewLine}";
+                    updatedContent += $"LengthScale={speedValue.ToString(System.Globalization.CultureInfo.InvariantCulture)}{Environment.NewLine}";
                     lengthScaleFound = true;
                 }
                 else
@@ -157,11 +157,12 @@ namespace piper_read
 
             if (!lengthScaleFound)
             {
-                updatedContent += $"LengthScale={speedValue}{Environment.NewLine}";
+                updatedContent += $"LengthScale={speedValue.ToString(System.Globalization.CultureInfo.InvariantCulture)}{Environment.NewLine}";
             }
 
             File.WriteAllText(settingsPath, updatedContent.TrimEnd());
         }
+
 
         private void OpenMenuItem_Click(object sender, EventArgs e)
         {
@@ -182,8 +183,9 @@ namespace piper_read
 
         private void AboutMenuItem_Click(object sender, EventArgs e)
         {
-            string aboutMessage = "Version: 1.0.5\n" +
-                                  "Developed by jame25\n\n\n\n" +
+            string aboutMessage = "\n\n" +
+                                  "Version: 1.0.6\n" +
+                                  "Developed by jame25\n\n" +
                                   "https://github.com/jame25/piper-read";
 
             // Create a new form for the about dialog
