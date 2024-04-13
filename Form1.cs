@@ -184,7 +184,7 @@ namespace piper_read
         private void AboutMenuItem_Click(object sender, EventArgs e)
         {
             string aboutMessage = "\n\n" +
-                                  "Version: 1.0.7\n" +
+                                  "Version: 1.0.8\n" +
                                   "Developed by jame25\n\n" +
                                   "https://github.com/jame25/piper-read";
 
@@ -400,6 +400,9 @@ namespace piper_read
                     break;
 
                 string paragraph = paragraphs[i];
+
+                // Scroll to the current paragraph in the textbox
+                ScrollToLine(txtInput.GetLineFromCharIndex(txtInput.Text.IndexOf(paragraph)));
 
                 // Handle full stop before quotation marks
                 paragraph = HandleFullStopBeforeQuotationMarks(paragraph);
@@ -671,6 +674,9 @@ namespace piper_read
 
                     string paragraph = paragraphs[i];
 
+                    // Scroll to the current paragraph in the textbox
+                    ScrollToLine(txtInput.GetLineFromCharIndex(txtInput.Text.IndexOf(paragraph)));
+
 
                     // Handle full stop before quotation marks
                     paragraph = HandleFullStopBeforeQuotationMarks(paragraph);
@@ -860,6 +866,15 @@ namespace piper_read
                 btnReplay.Enabled = true;
             }
         }
+
+        private void ScrollToLine(int lineIndex)
+        {
+            int firstCharIndex = txtInput.GetFirstCharIndexFromLine(lineIndex);
+            txtInput.SelectionStart = firstCharIndex;
+            txtInput.SelectionLength = 0;
+            txtInput.ScrollToCaret();
+        }
+
 
         private string HandleFullStopBeforeQuotationMarks(string paragraph)
         {
