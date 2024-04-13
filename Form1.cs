@@ -13,6 +13,7 @@ namespace piper_read
     public partial class Form1 : Form
     {
         private List<WaveOutEvent> waveOutEvents = new List<WaveOutEvent>();
+        private Dictionary<WaveOutEvent, WaveStream> waveStreams = new Dictionary<WaveOutEvent, WaveStream>();
         private TrackBar trackBarSpeed;
         private Label lblSpeed;
         private bool stopPlayback = false;
@@ -163,7 +164,6 @@ namespace piper_read
             File.WriteAllText(settingsPath, updatedContent.TrimEnd());
         }
 
-
         private void OpenMenuItem_Click(object sender, EventArgs e)
         {
             OpenFileDialog openFileDialog = new OpenFileDialog();
@@ -184,7 +184,7 @@ namespace piper_read
         private void AboutMenuItem_Click(object sender, EventArgs e)
         {
             string aboutMessage = "\n\n" +
-                                  "Version: 1.0.6\n" +
+                                  "Version: 1.0.7\n" +
                                   "Developed by jame25\n\n" +
                                   "https://github.com/jame25/piper-read";
 
@@ -337,6 +337,276 @@ namespace piper_read
             }
         }
 
+        private async void btnReplay_Click(object sender, EventArgs e)
+        {
+            // Read the contents of "ignore.dict" file
+            string[] ignoreKeywords = File.ReadAllLines("ignore.dict");
+
+            // Read the contents of "banned.dict" file
+            string[] bannedKeywords = File.ReadAllLines("banned.dict");
+
+            // Read the contents of "replace.dict" file
+            string[] replaceKeywords = File.ReadAllLines("replace.dict");
+
+            // Create the replaceDict dictionary
+            Dictionary<string, string> replaceDict = new Dictionary<string, string>();
+            foreach (string line in replaceKeywords)
+            {
+                string[] parts = line.Split('=');
+                if (parts.Length == 2)
+                {
+                    replaceDict[parts[0]] = parts[1];
+                }
+            }
+
+            // Get the current cursor position in the txtInput control
+            int cursorPosition = txtInput.SelectionStart;
+
+            // Find the paragraph index based on the cursor position
+            string inputText = txtInput.Text;
+            string[] paragraphs = inputText.Split(new[] { Environment.NewLine + Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries);
+            int paragraphIndex = 0;
+            int currentPosition = 0;
+
+            for (int i = 0; i < paragraphs.Length; i++)
+            {
+                currentPosition += paragraphs[i].Length + 2; // Add 2 for the double newline separator
+                if (currentPosition > cursorPosition)
+                {
+                    paragraphIndex = i;
+                    break;
+                }
+            }
+
+            // Stop any ongoing playback
+            stopPlayback = true;
+            await Task.Delay(100); // Wait for the playback to stop
+
+            // Reset the playback state
+            stopPlayback = false;
+            isPaused = false;
+
+            // Change the "Clear" button text to "Stop"
+            btnClearStop.Text = "Stop";
+
+            // Disable the "Replay" button during audio playback
+            btnReplay.Enabled = false;
+
+            Task<MemoryStream> previousProcessingTask = null;
+
+            for (int i = paragraphIndex; i < paragraphs.Length; i++)
+            {
+                if (stopPlayback)
+                    break;
+
+                string paragraph = paragraphs[i];
+
+                // Handle full stop before quotation marks
+                paragraph = HandleFullStopBeforeQuotationMarks(paragraph);
+
+                // Check if the paragraph contains any banned keywords
+                if (bannedKeywords.Any(keyword => paragraph.Contains(keyword)))
+                {
+                    // Skip the entire line if a banned keyword is found
+                    continue;
+                }
+
+                // Remove ignore keywords from the paragraph
+                foreach (string keyword in ignoreKeywords)
+                {
+                    paragraph = paragraph.Replace(keyword, string.Empty);
+                }
+
+                // Replace words based on the "replace.dict" file
+                foreach (var entry in replaceDict)
+                {
+                    paragraph = paragraph.Replace(entry.Key, entry.Value);
+                }
+
+                // Retrieve the length scale value from the settings file
+                double lengthScale = (11 - trackBarSpeed.Value) * 0.1;
+
+                // Create a task to process the current paragraph with piper.exe
+                Task<MemoryStream> currentProcessingTask = Task.Run(async () =>
+                {
+                    using (Process piperProcess = new Process())
+                    {
+                        piperProcess.StartInfo.FileName = "piper.exe";
+                        // Append the .onnx extension to the model name
+                        string modelName = lblModelName.Text + ".onnx";
+                        piperProcess.StartInfo.Arguments = $"--model {modelName} --length_scale {lengthScale} --output-raw";
+                        piperProcess.StartInfo.UseShellExecute = false;
+                        piperProcess.StartInfo.CreateNoWindow = true;
+                        piperProcess.StartInfo.RedirectStandardInput = true;
+                        piperProcess.StartInfo.RedirectStandardOutput = true;
+                        piperProcess.Start();
+
+                        // Write the paragraph to the standard input of the process
+                        using (StreamWriter writer = piperProcess.StandardInput)
+                        {
+                            await writer.WriteAsync(paragraph);
+                        }
+
+                        // Create a buffer to store the audio data
+                        byte[] buffer = new byte[16384];
+                        MemoryStream audioStream = new MemoryStream();
+
+                        // Read the audio data from piper.exe output in chunks
+                        int bytesRead;
+                        while ((bytesRead = await piperProcess.StandardOutput.BaseStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                        {
+                            audioStream.Write(buffer, 0, bytesRead);
+                        }
+
+                        return audioStream;
+                    }
+                });
+                if (previousProcessingTask != null)
+                {
+                    // Wait for the previous paragraph's processing to complete
+                    MemoryStream audioStream = await previousProcessingTask;
+                    audioStream.Position = 0;
+
+                    using (WaveStream waveStream = new RawSourceWaveStream(audioStream, new WaveFormat(22000, 1)))
+                    {
+                        WaveOutEvent waveOutEvent = new WaveOutEvent();
+                        waveOutEvent.Init(waveStream);
+                        waveOutEvents.Add(waveOutEvent);
+                        waveOutEvent.Play();
+
+                        // Change the button text to "Pause"
+                        btnConvert.Text = "Pause";
+                        btnConvert.Enabled = true;
+
+                        while (waveOutEvent.PlaybackState == PlaybackState.Playing || waveOutEvent.PlaybackState == PlaybackState.Paused)
+                        {
+                            if (stopPlayback)
+                            {
+                                waveOutEvent.Stop();
+                                break;
+                            }
+
+                            if (isPaused && waveOutEvent.PlaybackState == PlaybackState.Playing)
+                            {
+                                waveOutEvent.Pause();
+                            }
+                            else if (!isPaused && waveOutEvent.PlaybackState == PlaybackState.Paused)
+                            {
+                                waveOutEvent.Play();
+                            }
+
+                            await Task.Delay(10);
+                        }
+
+                        // Remove the completed WaveOutEvent from the list
+                        waveOutEvents.Remove(waveOutEvent);
+                    }
+                }
+
+                previousProcessingTask = currentProcessingTask;
+            }
+
+            if (previousProcessingTask != null)
+            {
+                // Wait for the last paragraph's processing to complete
+                MemoryStream audioStream = await previousProcessingTask;
+                audioStream.Position = 0;
+
+                using (WaveStream waveStream = new RawSourceWaveStream(audioStream, new WaveFormat(22000, 1)))
+                {
+                    WaveOutEvent waveOutEvent = new WaveOutEvent();
+                    waveOutEvent.Init(waveStream);
+                    waveOutEvents.Add(waveOutEvent);
+                    waveOutEvent.Play();
+
+                    // Change the button text to "Pause"
+                    btnConvert.Text = "Pause";
+                    btnConvert.Enabled = true;
+
+                    while (waveOutEvent.PlaybackState == PlaybackState.Playing || waveOutEvent.PlaybackState == PlaybackState.Paused)
+                    {
+                        if (stopPlayback)
+                        {
+                            waveOutEvent.Stop();
+                            break;
+                        }
+
+                        if (isPaused && waveOutEvent.PlaybackState == PlaybackState.Playing)
+                        {
+                            waveOutEvent.Pause();
+                        }
+                        else if (!isPaused && waveOutEvent.PlaybackState == PlaybackState.Paused)
+                        {
+                            waveOutEvent.Play();
+                        }
+
+                        await Task.Delay(10);
+                    }
+
+                    // Remove the completed WaveOutEvent from the list
+                    waveOutEvents.Remove(waveOutEvent);
+                }
+            }
+
+            // Change the button text back to "Convert" if playback has ended
+            if (!isPaused && waveOutEvents.Count == 0)
+            {
+                btnConvert.Text = "Convert";
+                // Change the "Stop" button text back to "Clear"
+                btnClearStop.Text = "Clear";
+                // Enable the "Replay" button after audio playback is finished
+                btnReplay.Enabled = true;
+            }
+        }
+
+
+
+        private void btnFastForward_Click(object sender, EventArgs e)
+        {
+            if (waveOutEvents.Count > 0)
+            {
+                foreach (var waveOutEvent in waveOutEvents)
+                {
+                    if (waveOutEvent.PlaybackState == PlaybackState.Playing || waveOutEvent.PlaybackState == PlaybackState.Paused)
+                    {
+                        // Get the current position in seconds
+                        double currentPositionSeconds = waveOutEvent.GetPosition() / (double)waveOutEvent.OutputWaveFormat.AverageBytesPerSecond;
+
+                        // Calculate the new position by subtracting 5 seconds
+                        double newPositionSeconds = Math.Max(0, currentPositionSeconds - 5);
+
+                        // Stop the current playback
+                        waveOutEvent.Stop();
+
+                        // Get the original WaveStream from the dictionary
+                        if (waveStreams.TryGetValue(waveOutEvent, out var waveStream))
+                        {
+                            // Set the position of the original WaveStream to the new position
+                            waveStream.Position = (long)(newPositionSeconds * waveOutEvent.OutputWaveFormat.AverageBytesPerSecond);
+
+                            // Initialize a new WaveOutEvent with the original WaveStream
+                            var newWaveOutEvent = new WaveOutEvent();
+                            newWaveOutEvent.Init(waveStream);
+
+                            // Replace the old WaveOutEvent with the new one
+                            int index = waveOutEvents.IndexOf(waveOutEvent);
+                            waveOutEvents[index] = newWaveOutEvent;
+
+                            // Update the dictionary with the new WaveOutEvent
+                            waveStreams.Remove(waveOutEvent);
+                            waveStreams.Add(newWaveOutEvent, waveStream);
+
+                            // Start playback from the new position
+                            newWaveOutEvent.Play();
+                        }
+                    }
+                }
+            }
+        }
+
+
+
+
         private void TrackBarSpeed_ValueChanged(object sender, EventArgs e)
         {
             // Calculate the speed value in the inverted order
@@ -380,8 +650,9 @@ namespace piper_read
                     return;
                 }
 
-                // Disable the "Convert" button during audio playback
+                // Disable the "Convert" and "Replay" buttons during audio playback
                 btnConvert.Enabled = false;
+                btnReplay.Enabled = false;
 
                 string[] paragraphs = inputText.Split(new[] { Environment.NewLine + Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries);
 
@@ -582,6 +853,11 @@ namespace piper_read
                 }
                 isPaused = false;
                 btnConvert.Text = "Pause";
+            }
+            // Enable the "Replay" button only if playback has ended
+            if (btnConvert.Text == "Convert" && waveOutEvents.Count == 0)
+            {
+                btnReplay.Enabled = true;
             }
         }
 
