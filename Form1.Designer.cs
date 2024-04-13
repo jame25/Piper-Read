@@ -98,11 +98,35 @@ partial class Form1
         this.lblModelName.TabIndex = 3;
         this.lblModelName.Text = "Model";
 
+        // btnReplay
+        this.btnReplay = new System.Windows.Forms.Button();
+        this.btnReplay.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
+        this.btnReplay.Location = new System.Drawing.Point(250, 415);
+        this.btnReplay.Name = "btnReplay";
+        this.btnReplay.Size = new System.Drawing.Size(75, 23);
+        this.btnReplay.TabIndex = 4;
+        this.btnReplay.Text = "Cursor";
+        this.btnReplay.UseVisualStyleBackColor = true;
+        this.btnReplay.Click += new System.EventHandler(this.btnReplay_Click);
+
+        // btnFastForward
+        this.btnFastForward = new System.Windows.Forms.Button();
+        this.btnFastForward.Anchor = ((System.Windows.Forms.AnchorStyles)((System.Windows.Forms.AnchorStyles.Bottom | System.Windows.Forms.AnchorStyles.Left)));
+        this.btnFastForward.Location = new System.Drawing.Point(330, 415);
+        this.btnFastForward.Name = "btnFastForward";
+        this.btnFastForward.Size = new System.Drawing.Size(100, 23);
+        this.btnFastForward.TabIndex = 4;
+        this.btnFastForward.Text = "Skip Forward";
+        this.btnFastForward.UseVisualStyleBackColor = true;
+        this.btnFastForward.Click += new System.EventHandler(this.btnFastForward_Click);
+
         // Form1
         this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 15F);
         this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
         this.ClientSize = new System.Drawing.Size(800, 450);
         this.Controls.Add(this.lblModelName);
+        this.Controls.Add(this.btnReplay);
+        this.Controls.Add(this.btnFastForward);
         this.Controls.Add(this.btnClearStop);
         this.Controls.Add(this.btnConvert);
         this.Controls.Add(this.txtInput);
@@ -119,4 +143,6 @@ partial class Form1
     private System.Windows.Forms.Button btnConvert;
     private System.Windows.Forms.Button btnClearStop;
     private System.Windows.Forms.Label lblModelName;
+    private System.Windows.Forms.Button btnReplay;
+    private System.Windows.Forms.Button btnFastForward;
 }
