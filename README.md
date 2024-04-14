@@ -2,6 +2,9 @@
 
 Piper Read is a small GUI utility for Windows, that utilizes [Piper](https://github.com/rhasspy/piper). It will read aloud the contents of the input window.
 
+<img width="576" alt="piperread" src="https://github.com/jame25/Piper-Read/assets/13631646/3ff479e4-f427-4430-89f1-7106d34b41e5">
+
+
 ## Features:
 * Read content aloud
 * Many voices to choose from
