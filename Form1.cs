@@ -740,7 +740,7 @@ namespace piper_read
                     }
 
                     // Wait for playback to finish
-                    while (waveOutEvent.PlaybackState == PlaybackState.Playing && bufferedWaveProvider.BufferedBytes > 0)
+                    while ((waveOutEvent.PlaybackState == PlaybackState.Playing || waveOutEvent.PlaybackState == PlaybackState.Paused) && bufferedWaveProvider.BufferedBytes > 0)
                     {
                         if (cancellationToken.IsCancellationRequested || stopPlayback)
                         {
