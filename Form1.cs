@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Reflection;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -14,6 +16,7 @@ namespace piper_read
     {
         private List<WaveOutEvent> waveOutEvents = new List<WaveOutEvent>();
         private Dictionary<WaveOutEvent, WaveStream> waveStreams = new Dictionary<WaveOutEvent, WaveStream>();
+        private ComboBox comboBoxSpeakers;
         private TrackBar trackBarSpeed;
         private Label lblSpeed;
         private bool stopPlayback = false;
@@ -26,37 +29,12 @@ namespace piper_read
 
             this.Icon = new System.Drawing.Icon("icon.ico");
 
-            // Create the trackBarSpeed control programmatically
-            trackBarSpeed = new TrackBar();
-            trackBarSpeed.Size = new Size((this.ClientSize.Width - btnClearStop.Width - 40) / 4, 45); // Adjust the size to quarter the available width
-            trackBarSpeed.Location = new Point(btnClearStop.Left - trackBarSpeed.Width - 10, btnClearStop.Top); // Position it closer to the "Clear" button
-            trackBarSpeed.Minimum = 1;
-            trackBarSpeed.Maximum = 10;
-            trackBarSpeed.TickFrequency = 1;
-            trackBarSpeed.SmallChange = 1;
-            trackBarSpeed.Value = 10;
-            trackBarSpeed.ValueChanged += TrackBarSpeed_ValueChanged;
-            this.Controls.Add(trackBarSpeed);
+            // Do not re-initialize comboBoxSpeakers here
+            // Adjust properties without re-initializing
+            comboBoxSpeakers.DropDownStyle = ComboBoxStyle.DropDownList;
+            comboBoxSpeakers.Visible = false; // Initially hidden
 
-            // Create the lblSpeed control programmatically
-            lblSpeed = new Label();
-            lblSpeed.Text = "Speed: " + (1.0 / trackBarSpeed.Value).ToString("0.0"); // Set the initial text with the calculated speed value
-            lblSpeed.AutoSize = true;
-            lblSpeed.MinimumSize = new Size(80, 0); // Set a minimum width for the label
-            lblSpeed.TextAlign = ContentAlignment.MiddleRight; // Align the text to the right
-            lblSpeed.Location = new Point(trackBarSpeed.Left - lblSpeed.Width - 5, trackBarSpeed.Top + (trackBarSpeed.Height - lblSpeed.Height) / 4);
-            this.Controls.Add(lblSpeed);
-
-            // Bring the lblSpeed control to the front
-            lblSpeed.BringToFront();
-
-            // Update the lblSpeed text when the trackBarSpeed value changes
-            trackBarSpeed.ValueChanged += (sender, e) =>
-            {
-                double speed = (11 - trackBarSpeed.Value) * 0.1;
-                lblSpeed.Text = "Speed: " + speed.ToString("0.0");
-            };
-
+            comboBoxSpeakers.SelectedIndexChanged += ComboBoxSpeakers_SelectedIndexChanged;
 
             // Adjust the positions and sizes of the controls when the form is resized
             this.Resize += (sender, e) =>
@@ -66,25 +44,44 @@ namespace piper_read
                 lblSpeed.Location = new Point(trackBarSpeed.Left - lblSpeed.Width - 5, trackBarSpeed.Top + (trackBarSpeed.Height - lblSpeed.Height) / 4);
             };
 
-
-
             // Retrieve the selected model name and length scale from the settings file
-            (string selectedModelName, double lengthScale) = GetSelectedModelNameAndLengthScale();
+            (string selectedModelName, double lengthScale, int selectedSpeakerId) = GetSelectedModelNameAndLengthScale();
 
             // Set the model name in the lblModelName control
             if (!string.IsNullOrEmpty(selectedModelName))
             {
                 lblModelName.Text = selectedModelName;
+
+                // Load the number of speakers for the selected model
+                int speakerCount = LoadSpeakerCountFromFile(selectedModelName);
+
+                if (speakerCount > 1)
+                {
+                    // Populate the comboBoxSpeakers with speaker IDs
+                    comboBoxSpeakers.Items.Clear();
+                    for (int i = 0; i < speakerCount; i++)
+                    {
+                        comboBoxSpeakers.Items.Add($"Speaker {i}");
+                    }
+
+                    // Set the selected speaker ID
+                    if (selectedSpeakerId >= 0 && selectedSpeakerId < speakerCount)
+                    {
+                        comboBoxSpeakers.SelectedIndex = selectedSpeakerId;
+                    }
+                    else
+                    {
+                        comboBoxSpeakers.SelectedIndex = 0;
+                    }
+
+                    // Display the comboBoxSpeakers
+                    comboBoxSpeakers.Visible = true;
+                }
             }
             else
             {
                 lblModelName.Text = "en_US-libritts_r-medium";
-            }
-
-            // Set the length scale value in the settings file if it doesn't exist
-            if (!File.ReadAllText(settingsPath).Contains("LengthScale="))
-            {
-                File.AppendAllText(settingsPath, Environment.NewLine + $"LengthScale={lengthScale}");
+                comboBoxSpeakers.Visible = false;
             }
 
             // Set the border style of lblModelName to FixedSingle
@@ -97,13 +94,22 @@ namespace piper_read
             lblModelName.Click += LblModelName_Click;
         }
 
-        private (string, double) GetSelectedModelNameAndLengthScale()
+        private void ComboBoxSpeakers_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            if (comboBoxSpeakers.SelectedIndex >= 0)
+            {
+                SaveSelectedSpeakerId(comboBoxSpeakers.SelectedIndex);
+            }
+        }
+
+        private (string, double, int) GetSelectedModelNameAndLengthScale()
         {
             if (File.Exists(settingsPath))
             {
                 string[] lines = File.ReadAllLines(settingsPath);
                 string selectedModelName = null;
                 double lengthScale = 1.0; // Default value
+                int selectedSpeakerId = 0; // Default to the first speaker
 
                 foreach (string line in lines)
                 {
@@ -118,20 +124,31 @@ namespace piper_read
                             lengthScale = scale;
                         }
                     }
+                    else if (line.StartsWith("SelectedSpeakerId="))
+                    {
+                        if (int.TryParse(line.Split('=')[1], out int speakerId))
+                        {
+                            selectedSpeakerId = speakerId;
+                        }
+                    }
                 }
 
                 // Set the trackbar value based on the saved length scale in the inverted order
                 trackBarSpeed.Value = (int)((1.1 - lengthScale) * 10);
 
-                return (selectedModelName, lengthScale);
+                return (selectedModelName, lengthScale, selectedSpeakerId);
             }
 
-            return (null, 1.0); // Default value
+            return (null, 1.0, 0); // Default values
         }
 
         private void SaveSelectedModelName(string modelName)
         {
-            string content = $"SelectedModelName={modelName}";
+            string content = $"SelectedModelName={modelName}{Environment.NewLine}";
+
+            // Reset the selected speaker ID when a new model is selected
+            content += "SelectedSpeakerId=0";
+
             File.WriteAllText(settingsPath, content);
         }
 
@@ -184,7 +201,7 @@ namespace piper_read
         private void AboutMenuItem_Click(object sender, EventArgs e)
         {
             string aboutMessage = "\n\n" +
-                                  "Version: 1.0.8\n" +
+                                  "Version: 1.0.9\n" +
                                   "Developed by jame25\n\n" +
                                   "https://github.com/jame25/piper-read";
 
@@ -262,6 +279,54 @@ namespace piper_read
             aboutForm.ShowDialog(this);
         }
 
+        private int LoadSpeakerCountFromFile(string modelName)
+        {
+            string jsonPath = Path.Combine(
+                Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location),
+                $"{modelName}.onnx.json"
+            );
+
+            if (File.Exists(jsonPath))
+            {
+                string jsonContent = File.ReadAllText(jsonPath);
+                using JsonDocument doc = JsonDocument.Parse(jsonContent);
+                if (doc.RootElement.TryGetProperty("num_speakers", out JsonElement numSpeakers))
+                {
+                    return numSpeakers.GetInt32();
+                }
+            }
+            // Default to 1 speaker if not found
+            return 1;
+        }
+
+        private void SaveSelectedSpeakerId(int speakerId)
+        {
+            string content = File.ReadAllText(settingsPath);
+            string[] lines = content.Split(new[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries);
+
+            string updatedContent = "";
+            bool speakerIdFound = false;
+
+            foreach (string line in lines)
+            {
+                if (line.StartsWith("SelectedSpeakerId="))
+                {
+                    updatedContent += $"SelectedSpeakerId={speakerId}{Environment.NewLine}";
+                    speakerIdFound = true;
+                }
+                else
+                {
+                    updatedContent += line + Environment.NewLine;
+                }
+            }
+
+            if (!speakerIdFound)
+            {
+                updatedContent += $"SelectedSpeakerId={speakerId}{Environment.NewLine}";
+            }
+
+            File.WriteAllText(settingsPath, updatedContent.TrimEnd());
+        }
 
         private void LblModelName_Click(object sender, EventArgs e)
         {
@@ -303,7 +368,7 @@ namespace piper_read
                 {
                     if (listBox.SelectedItem != null)
                     {
-                        // Update the lblModelName text with the selected model name without the .onnx extension
+                        // Update the lblModelName text with the selected model name
                         lblModelName.Text = listBox.SelectedItem.ToString();
                     }
                 };
@@ -326,12 +391,34 @@ namespace piper_read
                 {
                     if (listBox.SelectedItem != null)
                     {
-                        // Update the lblModelName text with the selected model name without the .onnx extension
+                        // Update the lblModelName text with the selected model name
                         string selectedModelName = listBox.SelectedItem.ToString();
                         lblModelName.Text = selectedModelName;
 
                         // Save the selected model name to the settings file
                         SaveSelectedModelName(selectedModelName);
+
+                        // Load the number of speakers for the selected model
+                        int speakerCount = LoadSpeakerCountFromFile(selectedModelName);
+
+                        if (speakerCount > 1)
+                        {
+                            // Populate the comboBoxSpeakers with speaker IDs
+                            comboBoxSpeakers.Items.Clear();
+                            for (int i = 0; i < speakerCount; i++)
+                            {
+                                comboBoxSpeakers.Items.Add($"Speaker {i}");
+                            }
+                            comboBoxSpeakers.SelectedIndex = 0; // Default to the first speaker
+
+                            // Display the comboBoxSpeakers
+                            comboBoxSpeakers.Visible = true;
+                        }
+                        else
+                        {
+                            // Hide the comboBoxSpeakers if only one speaker
+                            comboBoxSpeakers.Visible = false;
+                        }
                     }
                 }
             }
@@ -437,7 +524,16 @@ namespace piper_read
                         piperProcess.StartInfo.FileName = "piper.exe";
                         // Append the .onnx extension to the model name
                         string modelName = lblModelName.Text + ".onnx";
-                        piperProcess.StartInfo.Arguments = $"--model {modelName} --length_scale {lengthScale} --output-raw";
+
+                        // Check if the comboBoxSpeakers is visible and get the selected speaker
+                        string speakerArg = "";
+                        if (comboBoxSpeakers.Visible && comboBoxSpeakers.SelectedItem != null)
+                        {
+                            int speakerId = comboBoxSpeakers.SelectedIndex;
+                            speakerArg = $"--speaker {speakerId}";
+                        }
+
+                        piperProcess.StartInfo.Arguments = $"--model \"{modelName}\" --length_scale {lengthScale.ToString(System.Globalization.CultureInfo.InvariantCulture)} {speakerArg} --output-raw";
                         piperProcess.StartInfo.UseShellExecute = false;
                         piperProcess.StartInfo.CreateNoWindow = true;
                         piperProcess.StartInfo.RedirectStandardInput = true;
@@ -607,29 +703,95 @@ namespace piper_read
             }
         }
 
-
-
-
-        private void TrackBarSpeed_ValueChanged(object sender, EventArgs e)
+        private async Task StreamAudioPlayback(Process piperProcess, CancellationToken cancellationToken)
         {
-            // Calculate the speed value in the inverted order
+            if (piperProcess?.StandardOutput?.BaseStream == null)
+            {
+                // Handle null process or stream
+                return;
+            }
+
+            try
+            {
+                var waveFormat = new WaveFormat(22000, 16, 1);
+                var bufferedWaveProvider = new BufferedWaveProvider(waveFormat)
+                {
+                    BufferDuration = TimeSpan.FromMinutes(5), // Buffer duration
+                    DiscardOnBufferOverflow = false
+                };
+
+                using (var waveOutEvent = new WaveOutEvent())
+                {
+                    waveOutEvent.Init(bufferedWaveProvider);
+                    waveOutEvents.Add(waveOutEvent);
+                    waveOutEvent.Play();
+
+                    byte[] buffer = new byte[16384];
+                    int bytesRead;
+
+                    // Read audio data from the process and add it to the buffer
+                    while ((bytesRead = await piperProcess.StandardOutput.BaseStream.ReadAsync(buffer, 0, buffer.Length, cancellationToken)) > 0)
+                    {
+                        if (cancellationToken.IsCancellationRequested || stopPlayback)
+                        {
+                            break;
+                        }
+                        bufferedWaveProvider.AddSamples(buffer, 0, bytesRead);
+                    }
+
+                    // Wait for playback to finish
+                    while (waveOutEvent.PlaybackState == PlaybackState.Playing && bufferedWaveProvider.BufferedBytes > 0)
+                    {
+                        if (cancellationToken.IsCancellationRequested || stopPlayback)
+                        {
+                            waveOutEvent.Stop();
+                            break;
+                        }
+
+                        if (isPaused && waveOutEvent.PlaybackState == PlaybackState.Playing)
+                        {
+                            waveOutEvent.Pause();
+                        }
+                        else if (!isPaused && waveOutEvent.PlaybackState == PlaybackState.Paused)
+                        {
+                            waveOutEvent.Play();
+                        }
+
+                        await Task.Delay(50);
+                    }
+
+                    waveOutEvent.Stop();
+                    waveOutEvents.Remove(waveOutEvent);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Handle exceptions
+                MessageBox.Show($"Error during playback: {ex.Message}");
+            }
+            finally
+            {
+                piperProcess?.Dispose();
+            }
+        }
+
+        private void trackBarSpeed_ValueChanged(object sender, EventArgs e)
+        {
             double speedValue = (11 - trackBarSpeed.Value) * 0.1;
             lblSpeed.Text = $"Speed: {speedValue:0.0}";
-
-            // Save the selected speed value to the settings file
             SaveSelectedSpeedValue(speedValue);
         }
 
         private async void btnConvert_Click(object sender, EventArgs e)
         {
             // Read the contents of "ignore.dict" file
-            string[] ignoreKeywords = File.ReadAllLines("ignore.dict");
+            string[] ignoreKeywords = File.Exists("ignore.dict") ? File.ReadAllLines("ignore.dict") : new string[0];
 
             // Read the contents of "banned.dict" file
-            string[] bannedKeywords = File.ReadAllLines("banned.dict");
+            string[] bannedKeywords = File.Exists("banned.dict") ? File.ReadAllLines("banned.dict") : new string[0];
 
             // Read the contents of "replace.dict" file
-            string[] replaceKeywords = File.ReadAllLines("replace.dict");
+            string[] replaceKeywords = File.Exists("replace.dict") ? File.ReadAllLines("replace.dict") : new string[0];
 
             // Create the replaceDict dictionary
             Dictionary<string, string> replaceDict = new Dictionary<string, string>();
@@ -642,7 +804,6 @@ namespace piper_read
                 }
             }
 
-
             if (btnConvert.Text == "Convert")
             {
                 string inputText = txtInput.Text;
@@ -654,175 +815,82 @@ namespace piper_read
                 }
 
                 // Disable the "Convert" and "Replay" buttons during audio playback
-                btnConvert.Enabled = false;
+                btnConvert.Enabled = true; // We need to keep it enabled to allow Pause/Resume
                 btnReplay.Enabled = false;
 
                 string[] paragraphs = inputText.Split(new[] { Environment.NewLine + Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries);
 
                 stopPlayback = false;
                 isPaused = false;
-
-                // Change the "Clear" button text to "Stop"
+                btnConvert.Text = "Pause";
                 btnClearStop.Text = "Stop";
 
-                Task<MemoryStream> previousProcessingTask = null;
-
-                for (int i = 0; i < paragraphs.Length; i++)
+                foreach (string paragraph in paragraphs)
                 {
                     if (stopPlayback)
                         break;
 
-                    string paragraph = paragraphs[i];
+                    string processedParagraph = paragraph;
 
                     // Scroll to the current paragraph in the textbox
                     ScrollToLine(txtInput.GetLineFromCharIndex(txtInput.Text.IndexOf(paragraph)));
 
-
                     // Handle full stop before quotation marks
-                    paragraph = HandleFullStopBeforeQuotationMarks(paragraph);
+                    processedParagraph = HandleFullStopBeforeQuotationMarks(processedParagraph);
 
                     // Check if the paragraph contains any banned keywords
-                    if (bannedKeywords.Any(keyword => paragraph.Contains(keyword)))
+                    if (bannedKeywords.Any(keyword => processedParagraph.Contains(keyword)))
                     {
-                        // Skip the entire line if a banned keyword is found
+                        // Skip the entire paragraph if a banned keyword is found
                         continue;
                     }
 
                     // Remove ignore keywords from the paragraph
                     foreach (string keyword in ignoreKeywords)
                     {
-                        paragraph = paragraph.Replace(keyword, string.Empty);
+                        processedParagraph = processedParagraph.Replace(keyword, string.Empty);
                     }
 
                     // Replace words based on the "replace.dict" file
                     foreach (var entry in replaceDict)
                     {
-                        paragraph = paragraph.Replace(entry.Key, entry.Value);
+                        processedParagraph = processedParagraph.Replace(entry.Key, entry.Value);
                     }
 
                     // Retrieve the length scale value from the settings file
                     double lengthScale = (11 - trackBarSpeed.Value) * 0.1;
 
-                    // Create a task to process the current paragraph with piper.exe
-                    Task<MemoryStream> currentProcessingTask = Task.Run(async () =>
+                    // Start piper process
+                    var piperProcess = new Process();
+                    piperProcess.StartInfo.FileName = "piper.exe";
+                    // Append the .onnx extension to the model name
+                    string modelName = lblModelName.Text + ".onnx";
+
+                    // Check if the comboBoxSpeakers is visible and get the selected speaker
+                    string speakerArg = "";
+                    if (comboBoxSpeakers.Visible && comboBoxSpeakers.SelectedItem != null)
                     {
-                        using (Process piperProcess = new Process())
-                        {
-                            piperProcess.StartInfo.FileName = "piper.exe";
-                            // Append the .onnx extension to the model name
-                            string modelName = lblModelName.Text + ".onnx";
-                            piperProcess.StartInfo.Arguments = $"--model {modelName} --length_scale {lengthScale} --output-raw";
-                            piperProcess.StartInfo.UseShellExecute = false;
-                            piperProcess.StartInfo.CreateNoWindow = true;
-                            piperProcess.StartInfo.RedirectStandardInput = true;
-                            piperProcess.StartInfo.RedirectStandardOutput = true;
-                            piperProcess.Start();
-
-                            // Write the paragraph to the standard input of the process
-                            using (StreamWriter writer = piperProcess.StandardInput)
-                            {
-                                await writer.WriteAsync(paragraph);
-                            }
-
-                            // Create a buffer to store the audio data
-                            byte[] buffer = new byte[16384];
-                            MemoryStream audioStream = new MemoryStream();
-
-                            // Read the audio data from piper.exe output in chunks
-                            int bytesRead;
-                            while ((bytesRead = await piperProcess.StandardOutput.BaseStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
-                            {
-                                audioStream.Write(buffer, 0, bytesRead);
-                            }
-
-                            return audioStream;
-                        }
-                    });
-
-                    if (previousProcessingTask != null)
-                    {
-                        // Wait for the previous paragraph's processing to complete
-                        MemoryStream audioStream = await previousProcessingTask;
-                        audioStream.Position = 0;
-
-                        using (WaveStream waveStream = new RawSourceWaveStream(audioStream, new WaveFormat(22000, 1)))
-                        {
-                            WaveOutEvent waveOutEvent = new WaveOutEvent();
-                            waveOutEvent.Init(waveStream);
-                            waveOutEvents.Add(waveOutEvent);
-                            waveOutEvent.Play();
-
-                            // Change the button text to "Pause"
-                            btnConvert.Text = "Pause";
-                            btnConvert.Enabled = true;
-
-                            while (waveOutEvent.PlaybackState == PlaybackState.Playing || waveOutEvent.PlaybackState == PlaybackState.Paused)
-                            {
-                                if (stopPlayback)
-                                {
-                                    waveOutEvent.Stop();
-                                    break;
-                                }
-
-                                if (isPaused && waveOutEvent.PlaybackState == PlaybackState.Playing)
-                                {
-                                    waveOutEvent.Pause();
-                                }
-                                else if (!isPaused && waveOutEvent.PlaybackState == PlaybackState.Paused)
-                                {
-                                    waveOutEvent.Play();
-                                }
-
-                                await Task.Delay(10);
-                            }
-
-                            // Remove the completed WaveOutEvent from the list
-                            waveOutEvents.Remove(waveOutEvent);
-                        }
+                        int speakerId = comboBoxSpeakers.SelectedIndex;
+                        speakerArg = $"--speaker {speakerId}";
                     }
 
-                    previousProcessingTask = currentProcessingTask;
-                }
+                    piperProcess.StartInfo.Arguments = $"--model \"{modelName}\" --length_scale {lengthScale.ToString(System.Globalization.CultureInfo.InvariantCulture)} {speakerArg} --output-raw";
+                    piperProcess.StartInfo.UseShellExecute = false;
+                    piperProcess.StartInfo.CreateNoWindow = true;
+                    piperProcess.StartInfo.RedirectStandardInput = true;
+                    piperProcess.StartInfo.RedirectStandardOutput = true;
+                    piperProcess.Start();
 
-                if (previousProcessingTask != null)
-                {
-                    // Wait for the last paragraph's processing to complete
-                    MemoryStream audioStream = await previousProcessingTask;
-                    audioStream.Position = 0;
-
-                    using (WaveStream waveStream = new RawSourceWaveStream(audioStream, new WaveFormat(22000, 1)))
+                    // Write the processed paragraph to the standard input of the process
+                    using (StreamWriter writer = piperProcess.StandardInput)
                     {
-                        WaveOutEvent waveOutEvent = new WaveOutEvent();
-                        waveOutEvent.Init(waveStream);
-                        waveOutEvents.Add(waveOutEvent);
-                        waveOutEvent.Play();
+                        await writer.WriteAsync(processedParagraph);
+                    }
 
-                        // Change the button text to "Pause"
-                        btnConvert.Text = "Pause";
-                        btnConvert.Enabled = true;
-
-                        while (waveOutEvent.PlaybackState == PlaybackState.Playing || waveOutEvent.PlaybackState == PlaybackState.Paused)
-                        {
-                            if (stopPlayback)
-                            {
-                                waveOutEvent.Stop();
-                                break;
-                            }
-
-                            if (isPaused && waveOutEvent.PlaybackState == PlaybackState.Playing)
-                            {
-                                waveOutEvent.Pause();
-                            }
-                            else if (!isPaused && waveOutEvent.PlaybackState == PlaybackState.Paused)
-                            {
-                                waveOutEvent.Play();
-                            }
-
-                            await Task.Delay(10);
-                        }
-
-                        // Remove the completed WaveOutEvent from the list
-                        waveOutEvents.Remove(waveOutEvent);
+                    // Start streaming audio playback
+                    using (var cancellationTokenSource = new CancellationTokenSource())
+                    {
+                        await StreamAudioPlayback(piperProcess, cancellationTokenSource.Token);
                     }
                 }
 
@@ -830,8 +898,8 @@ namespace piper_read
                 if (!isPaused && waveOutEvents.Count == 0)
                 {
                     btnConvert.Text = "Convert";
-                    // Change the "Stop" button text back to "Clear"
                     btnClearStop.Text = "Clear";
+                    btnReplay.Enabled = true;
                 }
             }
             else if (btnConvert.Text == "Pause")
