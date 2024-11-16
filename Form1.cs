@@ -201,7 +201,7 @@ namespace piper_read
         private void AboutMenuItem_Click(object sender, EventArgs e)
         {
             string aboutMessage = "\n\n" +
-                                  "Version: 1.0.9\n" +
+                                  "Version: 1.1.0\n" +
                                   "Developed by jame25\n\n" +
                                   "https://github.com/jame25/piper-read";
 
